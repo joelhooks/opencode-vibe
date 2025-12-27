@@ -1067,6 +1067,32 @@ case 'session.updated': {
 
 ## Edge Cases & Gotchas
 
+### 0. Immer + Map Incompatibility (CRITICAL)
+
+**Problem:** Using `Map<string, Message[]>` with Zustand's Immer middleware causes "Proxy has already been revoked" errors.
+
+**Root Cause:** Immer's MapSet plugin wraps Map values in draft proxies that get revoked after the producer function completes. When `Binary.insert` or spread operators try to access array elements later, the proxy is already revoked.
+
+```typescript
+// ❌ BAD - Will cause proxy errors
+type State = {
+  messages: Map<string, Message[]>;
+};
+
+// ✅ GOOD - Works perfectly with Immer
+type State = {
+  messages: Record<string, Message[]>;
+};
+```
+
+**Migration:**
+
+- `Map.get(k)` → `record[k]`
+- `Map.set(k, v)` → `record[k] = v`
+- `messages.size` → `Object.keys(messages).length`
+
+**Rule:** Use `Record<K, V>` instead of `Map<K, V>` for ANY Zustand + Immer store with nested structures.
+
 ### 1. Race Condition: REST vs SSE
 
 **Problem:** User sends message → SSE event arrives before REST response.
@@ -1385,5 +1411,60 @@ function PartRenderer({ part }: { part: Part }) {
 3. **Linear search** - Performance degrades with many sessions/messages
 4. **No reconnection** - Connection drops and client doesn't recover
 5. **No initial sync** - Messages don't load until SSE event arrives
+6. **Immer + Map** - Using Map with Immer causes proxy revocation errors (use Record instead)
+7. **Wrong event type** - Subscribing to `message.created` when API only emits `message.updated`
+8. **Wrong port** - Hardcoding wrong port (OpenCode default is 4056, not 4096)
 
 Follow this guide and your sync will be bulletproof.
+
+---
+
+## Implementation Notes (Next.js 16 Rebuild)
+
+### Architecture Decisions
+
+The Next.js implementation uses a **context-based SSE pattern** instead of the callback-based pattern shown above:
+
+```typescript
+// SSEProvider manages connection at app level
+<SSEProvider url={OPENCODE_URL}>
+  {children}
+</SSEProvider>
+
+// Components subscribe to specific event types
+const { subscribe } = useSSE()
+useEffect(() => {
+  return subscribe("message.updated", (event) => {
+    // Handle event
+  })
+}, [subscribe])
+```
+
+**Why context-based?**
+
+- Single SSE connection shared across all components
+- No prop drilling of callbacks
+- Automatic cleanup on unmount
+- Matches React patterns better than callback-based hooks
+
+### File Structure
+
+```
+apps/web/src/
+├── lib/
+│   └── binary.ts              # Binary.search, Binary.insert
+├── react/
+│   ├── store.ts               # Zustand + Immer store
+│   ├── use-sse.tsx            # SSEProvider + useSSE + useSSEDirect
+│   └── index.ts               # Public exports
+└── app/
+    └── providers.tsx          # Client providers wrapper
+```
+
+### Key Learnings from Implementation
+
+1. **Rename .ts to .tsx** when adding JSX (SSEProvider needs JSX)
+2. **Use Record not Map** for Immer compatibility
+3. **Export types** from index.ts for clean imports
+4. **Wrap app in Providers** component (client boundary)
+5. **useSSEDirect** available for cases needing direct control without provider

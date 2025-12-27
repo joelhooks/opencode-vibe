@@ -2,7 +2,14 @@
  * React hooks for OpenCode
  */
 
-export { useSSE } from "./use-sse"
+export {
+	useSSE,
+	SSEProvider,
+	useSSEDirect,
+	type SSEEventType,
+	type SSEEventCallback,
+	type SSEOptions,
+} from "./use-sse"
 export { useSession } from "./use-session"
 export { useCreateSession } from "./use-create-session"
 export { useProvider } from "./use-provider"

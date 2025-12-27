@@ -29,6 +29,7 @@
 		"clsx": "^2.1.1",
 		"cmdk": "^1.1.1",
 		"embla-carousel-react": "^8.6.0",
+		"immer": "^11.1.0",
 		"lucide-react": "^0.562.0",
 		"motion": "^12.23.26",
 		"nanoid": "^5.1.6",
@@ -39,13 +40,16 @@
 		"streamdown": "^1.6.10",
 		"tailwind-merge": "^3.4.0",
 		"tokenlens": "^1.3.1",
-		"use-stick-to-bottom": "^1.1.1"
+		"use-stick-to-bottom": "^1.1.1",
+		"zustand": "^5.0.9"
 	},
 	"devDependencies": {
 		"@tailwindcss/postcss": "^4",
+		"@testing-library/react": "^16.3.1",
 		"@types/node": "^20",
 		"@types/react": "^19",
 		"@types/react-dom": "^19",
+		"happy-dom": "^20.0.11",
 		"tailwindcss": "^4",
 		"typescript": "^5"
 	},
