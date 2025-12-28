@@ -269,4 +269,43 @@ describe("PromptInput", () => {
 			expect(pill.getAttribute("contenteditable")).toBe("false")
 		})
 	})
+
+	describe("Queue Indicator", () => {
+		test("does not show queue indicator when queueLength is 0", () => {
+			const { container } = render(<PromptInput queueLength={0} />, {
+				wrapper: TestWrapper,
+			})
+
+			const indicator = container.querySelector('output[aria-live="polite"]')
+			expect(indicator).toBeNull()
+		})
+
+		test("shows queue indicator when queueLength > 0", () => {
+			const { container } = render(<PromptInput queueLength={3} />, {
+				wrapper: TestWrapper,
+			})
+
+			const indicator = container.querySelector('output[aria-live="polite"]')
+			expect(indicator).not.toBeNull()
+			expect(indicator?.textContent).toContain("3 messages queued")
+		})
+
+		test("uses singular form when queueLength is 1", () => {
+			const { container } = render(<PromptInput queueLength={1} />, {
+				wrapper: TestWrapper,
+			})
+
+			const indicator = container.querySelector('output[aria-live="polite"]')
+			expect(indicator?.textContent).toContain("1 message queued")
+		})
+
+		test("uses plural form when queueLength > 1", () => {
+			const { container } = render(<PromptInput queueLength={5} />, {
+				wrapper: TestWrapper,
+			})
+
+			const indicator = container.querySelector('output[aria-live="polite"]')
+			expect(indicator?.textContent).toContain("5 messages queued")
+		})
+	})
 })

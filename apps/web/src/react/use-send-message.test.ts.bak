@@ -444,9 +444,7 @@ describe("useSendMessage", () => {
 			useSessionStatus: mock(() => ({ running: true, isLoading: false })),
 		}))
 
-		const { result } = renderHook(() =>
-			useSendMessage({ sessionId: "ses_123", directory: "/test" }),
-		)
+		const { result } = renderHook(() => useSendMessage({ sessionId: "ses_123", directory: "/test" }))
 
 		const parts: Prompt = [{ type: "text", content: "test", start: 0, end: 4 }]
 
@@ -459,6 +457,53 @@ describe("useSendMessage", () => {
 		// Should NOT have been sent because session is running
 		expect(callOrder).toEqual([])
 		expect(result.current.queueLength).toBe(1) // Still in queue
+	})
+		const mockClient = {
+			session: { promptAsync: mockPromptAsync },
+		}
+		mock.module("@/core/client", () => ({
+			createClient: mock(() => mockClient),
+		}))
+
+		// Mock useSessionStatus to return dynamic running state
+		mock.module("./use-session-status", () => ({
+			useSessionStatus: mock(() => ({
+				running: sessionRunning,
+				isLoading: false,
+			})),
+		}))
+
+		const { result, rerender } = renderHook(() =>
+			useSendMessage({ sessionId: "ses_123", directory: "/test" }),
+		)
+
+		const first: Prompt = [{ type: "text", content: "first", start: 0, end: 5 }]
+		const second: Prompt = [{ type: "text", content: "second", start: 0, end: 6 }]
+
+		// Send first message - should fire immediately
+		const firstSend = result.current.sendMessage(first)
+		await waitFor(() => expect(callOrder).toContain("first"))
+
+		// Queue second message while session is running
+		const secondSend = result.current.sendMessage(second)
+
+		// Second should NOT have been sent yet
+		await new Promise((r) => setTimeout(r, 50))
+		expect(callOrder).toEqual(["first"])
+
+		// Simulate session becoming idle
+		act(() => {
+			sessionRunning = false
+		})
+		rerender() // Trigger re-render to pick up new running value
+
+		// Wait for second message to be sent
+		await waitFor(() => expect(callOrder).toContain("second"), {
+			timeout: 1000,
+		})
+		expect(callOrder).toEqual(["first", "second"])
+
+		await Promise.all([firstSend, secondSend])
 	})
 
 	test("sends first message immediately even if no session status exists", async () => {
@@ -488,12 +533,15 @@ describe("useSendMessage", () => {
 		expect(mockPromptAsync).toHaveBeenCalledTimes(1)
 	})
 
-	test("processes queued messages when session is idle", async () => {
+	test("processes all queued messages when session becomes idle", async () => {
 		const callOrder: string[] = []
+		let sessionRunning = false
 
 		const mockPromptAsync = mock(async (args: { body: { parts: Array<{ text?: string }> } }) => {
 			const text = args.body.parts[0]?.text || "unknown"
 			callOrder.push(text)
+			// Mark session as running after each send
+			sessionRunning = true
 			return { data: undefined, error: undefined }
 		})
 		const mockClient = {
@@ -503,9 +551,12 @@ describe("useSendMessage", () => {
 			createClient: mock(() => mockClient),
 		}))
 
-		// Mock useSessionStatus to return idle (allows queue processing)
+		// Mock useSessionStatus to return dynamic running state
 		mock.module("./use-session-status", () => ({
-			useSessionStatus: mock(() => ({ running: false, isLoading: false })),
+			useSessionStatus: mock(() => ({
+				running: sessionRunning,
+				isLoading: false,
+			})),
 		}))
 
 		const { result } = renderHook(() =>
@@ -516,12 +567,26 @@ describe("useSendMessage", () => {
 		const second: Prompt = [{ type: "text", content: "second", start: 0, end: 6 }]
 		const third: Prompt = [{ type: "text", content: "third", start: 0, end: 5 }]
 
-		// Send all three - they should all process because session is idle
+		// Send first
 		result.current.sendMessage(first)
+		await waitFor(() => expect(callOrder).toContain("first"))
+
+		// Queue second and third while running
 		result.current.sendMessage(second)
 		result.current.sendMessage(third)
 
-		// All three should process in order
-		await waitFor(() => expect(callOrder).toEqual(["first", "second", "third"]))
+		// Still only first should be sent
+		await new Promise((r) => setTimeout(r, 50))
+		expect(callOrder).toEqual(["first"])
+
+		// Mark as idle - should process second
+		sessionRunning = false
+		await waitFor(() => expect(callOrder).toContain("second"))
+
+		// Mark as idle again for third
+		sessionRunning = false
+		await waitFor(() => expect(callOrder).toContain("third"))
+
+		expect(callOrder).toEqual(["first", "second", "third"])
 	})
 })

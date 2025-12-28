@@ -96,7 +96,8 @@ Subscribe to child session events and render them inline or in an expandable pan
 3. [SSE Event Tracking](#3-sse-event-tracking)
 4. [React Implementation](#4-react-implementation)
 5. [UI Components](#5-ui-components)
-6. [Advanced Patterns](#6-advanced-patterns)
+6. ["Currently Doing" Status Indicator](#6-currently-doing-status-indicator) ← **NEW**
+7. [Advanced Patterns](#7-advanced-patterns)
 
 ---
 
@@ -893,7 +894,379 @@ export function StreamingText({ partId, initialText }: StreamingTextProps) {
 
 ---
 
-## 6. Advanced Patterns
+## 6. "Currently Doing" Status Indicator
+
+The shallow/rolled-up view should show what the subagent is **actively doing right now**. This comes from the `metadata.summary` array on the Task tool part - specifically the last item with `status: "running"`.
+
+### Data Source
+
+The Task tool streams updates to its `metadata.summary` as the child session executes tools:
+
+```typescript
+// From ToolPart when tool === "task"
+interface TaskToolMetadata {
+  sessionId: string;
+  summary: Array<{
+    id: string;
+    tool: string;
+    state: {
+      status: "pending" | "running" | "completed" | "error";
+      title?: string; // Only present when completed
+    };
+  }>;
+}
+```
+
+### Extracting "Currently Doing"
+
+```typescript
+function getCurrentlyDoing(part: ToolPart): CurrentActivity | null {
+  if (part.tool !== "task") return null;
+  if (part.state.status === "pending") return null;
+
+  const metadata = part.state.metadata as TaskToolMetadata | undefined;
+  if (!metadata?.summary) return null;
+
+  // Find the currently running tool (last one with status: "running")
+  const running = metadata.summary
+    .filter((item) => item.state.status === "running")
+    .at(-1);
+
+  if (running) {
+    return {
+      type: "running",
+      tool: running.tool,
+      // No title yet - still in progress
+    };
+  }
+
+  // If nothing running, show the last completed tool
+  const lastCompleted = metadata.summary
+    .filter((item) => item.state.status === "completed")
+    .at(-1);
+
+  if (lastCompleted) {
+    return {
+      type: "completed",
+      tool: lastCompleted.tool,
+      title: lastCompleted.state.title,
+    };
+  }
+
+  return null;
+}
+
+interface CurrentActivity {
+  type: "running" | "completed";
+  tool: string;
+  title?: string;
+}
+```
+
+### Compact Status Component
+
+```tsx
+// components/SubagentCurrentActivity.tsx
+import { Loader2, Check, FileText, Search, Edit, Terminal } from "lucide-react";
+
+interface SubagentCurrentActivityProps {
+  part: ToolPart;
+}
+
+export function SubagentCurrentActivity({
+  part,
+}: SubagentCurrentActivityProps) {
+  const activity = getCurrentlyDoing(part);
+
+  if (!activity) {
+    // Still initializing
+    if (part.state.status === "running") {
+      return (
+        <div className="current-activity initializing">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          <span>Starting...</span>
+        </div>
+      );
+    }
+    return null;
+  }
+
+  const ToolIcon = getToolIcon(activity.tool);
+
+  return (
+    <div className={`current-activity ${activity.type}`}>
+      {activity.type === "running" ? (
+        <>
+          <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+          <ToolIcon className="h-3 w-3" />
+          <span className="tool-name">{formatToolName(activity.tool)}</span>
+        </>
+      ) : (
+        <>
+          <Check className="h-3 w-3 text-green-500" />
+          <span className="activity-title">
+            {activity.title || activity.tool}
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
+
+function getToolIcon(tool: string) {
+  const icons: Record<string, typeof FileText> = {
+    read: FileText,
+    grep: Search,
+    glob: Search,
+    edit: Edit,
+    write: Edit,
+    bash: Terminal,
+    // Add more as needed
+  };
+  return icons[tool] || FileText;
+}
+
+function formatToolName(tool: string): string {
+  const names: Record<string, string> = {
+    read: "Reading file",
+    grep: "Searching",
+    glob: "Finding files",
+    edit: "Editing",
+    write: "Writing",
+    bash: "Running command",
+    task: "Subagent",
+  };
+  return names[tool] || tool;
+}
+```
+
+### Rolled-Up Task Tool Header with Activity
+
+```tsx
+// components/TaskToolCompact.tsx
+interface TaskToolCompactProps {
+  part: ToolPart;
+  onClick: () => void;
+}
+
+export function TaskToolCompact({ part, onClick }: TaskToolCompactProps) {
+  const input = part.state.input as {
+    subagent_type?: string;
+    description?: string;
+  };
+  const metadata = part.state.metadata as TaskToolMetadata | undefined;
+  const isRunning = part.state.status === "running";
+  const isCompleted = part.state.status === "completed";
+
+  // Count completed tools
+  const completedCount =
+    metadata?.summary?.filter((s) => s.state.status === "completed").length ??
+    0;
+
+  return (
+    <button onClick={onClick} className="task-tool-compact">
+      {/* Left: Status indicator */}
+      <div className="task-status">
+        {isRunning ? (
+          <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+        ) : isCompleted ? (
+          <Check className="h-4 w-4 text-green-500" />
+        ) : (
+          <Circle className="h-4 w-4 text-gray-400" />
+        )}
+      </div>
+
+      {/* Middle: Agent + description + current activity */}
+      <div className="task-info">
+        <div className="task-header-row">
+          <span className="task-agent">@{input.subagent_type}</span>
+          <span className="task-description">{input.description}</span>
+        </div>
+
+        {/* Currently doing - the key feature! */}
+        {isRunning && <SubagentCurrentActivity part={part} />}
+
+        {/* Completed summary */}
+        {isCompleted && completedCount > 0 && (
+          <span className="task-completed-count">
+            {completedCount} tool{completedCount !== 1 ? "s" : ""} executed
+          </span>
+        )}
+      </div>
+
+      {/* Right: Expand chevron */}
+      <ChevronRight className="h-4 w-4 text-gray-400" />
+    </button>
+  );
+}
+```
+
+### Real-Time Updates via SSE
+
+The `message.part.updated` event fires whenever the Task tool's metadata changes. This happens every time a child tool starts or completes:
+
+```typescript
+// In your SSE handler
+case "message.part.updated": {
+  const part = event.payload.properties.part;
+
+  // Update the part in your store
+  updatePart(part.sessionID, part.messageID, part);
+
+  // The component will re-render with new metadata.summary
+  // showing the updated "currently doing" status
+  break;
+}
+```
+
+### CSS for Current Activity
+
+```css
+.current-activity {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+.current-activity.running {
+  color: var(--color-primary);
+}
+
+.current-activity.running .tool-name {
+  animation: pulse 2s infinite;
+}
+
+.current-activity.initializing {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.task-tool-compact {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  width: 100%;
+  text-align: left;
+  background: var(--color-bg-element);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.task-tool-compact:hover {
+  background: var(--color-bg-panel);
+}
+
+.task-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.task-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-agent {
+  font-weight: 600;
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.task-description {
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-completed-count {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+```
+
+### Example Output
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  ROLLED UP VIEW (Collapsed)                                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ⟳ @explore  Research the authentication flow                  │
+│     🔍 Searching...                                             │
+│                                                    [▶]          │
+│                                                                 │
+│  ✓ @refactorer  Rename getUserById to findUserById              │
+│     12 tools executed                                           │
+│                                                    [▶]          │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  EXPANDED VIEW (Click to expand)                                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ⟳ @explore  Research the authentication flow           [▼]    │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  I'll search for authentication patterns...             │   │
+│  │                                                         │   │
+│  │  ✓ [Read] src/auth/middleware.ts                        │   │
+│  │  ✓ [Grep] "session" in src/                             │   │
+│  │  ⟳ [Read] src/auth/providers/oauth.ts  ← Currently      │   │
+│  │                                                         │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Key Points
+
+1. **Data comes from `metadata.summary`** - No extra API calls needed
+2. **Real-time via SSE** - `message.part.updated` fires on every tool state change
+3. **Last running tool** - Show the most recent tool with `status: "running"`
+4. **Fallback to last completed** - When nothing running, show what just finished
+5. **Compact display** - Tool icon + action verb ("Reading file", "Searching...")
+
+---
+
+## 7. Advanced Patterns
+
+### Hybrid View Architecture
+
+Combine shallow and deep views for optimal UX:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      HYBRID VIEW PATTERN                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  SHALLOW VIEW (Default - No API calls)                          │
+│  ─────────────────────────────────────                          │
+│  Data source: Parent session's ToolPart.metadata                │
+│  Shows: Agent name, description, current activity, tool count   │
+│  Updates: Via parent session's SSE stream                       │
+│                                                                 │
+│  DEEP VIEW (On-demand - Lazy loaded)                            │
+│  ────────────────────────────────────                           │
+│  Data source: GET /session/:childId/message                     │
+│  Shows: Full conversation, all tool calls, streaming text       │
+│  Updates: Dedicated SSE subscription to child session           │
+│                                                                 │
+│  TRANSITION                                                     │
+│  ──────────                                                     │
+│  User clicks expand → Fetch child messages → Subscribe to SSE   │
+│  User clicks collapse → Keep data cached → Unsubscribe SSE      │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ### Nested Subagents
 
@@ -1253,6 +1626,19 @@ export function SubagentSheet({ partId, open, onClose }: SubagentSheetProps) {
 │  [x] Streaming text support                                         │
 │  [x] Progress indicators                                            │
 │  [x] Mobile-friendly sheet variant                                  │
+│                                                                     │
+│  "Currently Doing" Status (NEW)                                     │
+│  ──────────────────────────────                                     │
+│  [x] Extract running tool from metadata.summary                     │
+│  [x] Show tool icon + action verb in rolled-up view                 │
+│  [x] Real-time updates via message.part.updated                     │
+│  [x] Fallback to last completed when nothing running                │
+│                                                                     │
+│  Hybrid View Architecture                                           │
+│  ────────────────────────                                           │
+│  [x] Shallow view: No API calls, uses parent's ToolPart.metadata    │
+│  [x] Deep view: Lazy-loaded on expand, dedicated SSE subscription   │
+│  [x] Cached data on collapse (don't refetch)                        │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```

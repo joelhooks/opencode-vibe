@@ -52,6 +52,8 @@ export interface PromptInputProps {
 	disabled?: boolean
 	/** Loading state - shows spinner on submit button */
 	isLoading?: boolean
+	/** Number of messages queued (shows badge when > 0) */
+	queueLength?: number
 	/** Additional class names */
 	className?: string
 }
@@ -65,6 +67,7 @@ export function PromptInput({
 	placeholder,
 	disabled,
 	isLoading,
+	queueLength = 0,
 	className,
 }: PromptInputProps) {
 	const editorRef = useRef<HTMLDivElement>(null)
@@ -361,8 +364,24 @@ export function PromptInput({
 					)}
 				/>
 
-				{/* Footer with submit button */}
-				<div className="flex items-center justify-end px-3 pb-3">
+				{/* Footer with submit button and queue indicator */}
+				<div className="flex items-center justify-between px-3 pb-3">
+					{/* Queue indicator - only show when messages are queued */}
+					{queueLength > 0 && (
+						<output
+							className="flex items-center gap-1.5 text-xs text-muted-foreground"
+							aria-live="polite"
+						>
+							<span
+								className="size-1.5 rounded-full bg-yellow-500 animate-pulse"
+								aria-hidden="true"
+							/>
+							<span>
+								{queueLength} message{queueLength === 1 ? "" : "s"} queued
+							</span>
+						</output>
+					)}
+					<div className="flex-1" />
 					<Button
 						type="button"
 						size="icon"

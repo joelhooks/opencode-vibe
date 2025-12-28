@@ -345,7 +345,7 @@ function SessionContent({
 	const storeMessages = useMessages(sessionId)
 
 	// Send message hook - use contextDirectory to ensure we route to the right server
-	const { sendMessage, isLoading, error } = useSendMessage({
+	const { sendMessage, isLoading, error, queueLength } = useSendMessage({
 		sessionId,
 		directory: contextDirectory,
 	})
@@ -432,6 +432,7 @@ function SessionContent({
 							sessionId={sessionId}
 							onSubmit={handleSubmit}
 							disabled={isLoading}
+							queueLength={queueLength}
 							placeholder="Type a message... Use @ for files, / for commands"
 						/>
 						{/* Footer link */}

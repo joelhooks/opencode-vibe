@@ -69,12 +69,15 @@ export function OpenCodeProvider({ url, directory, children }: OpenCodeProviderP
 
 	/**
 	 * Bootstrap: Load initial data (sessions + statuses)
+	 *
+	 * Gracefully handles network failures - the app remains usable
+	 * and SSE will provide updates when connection is restored.
 	 */
 	const bootstrap = useCallback(async () => {
 		const client = clientRef.current
 
+		// Load sessions first (most important)
 		try {
-			// Load sessions (filtered and sorted)
 			const sessionsResponse = await client.session.list()
 			const fourHoursAgo = Date.now() - 4 * 60 * 60 * 1000
 
@@ -89,8 +92,20 @@ export function OpenCodeProvider({ url, directory, children }: OpenCodeProviderP
 				})
 
 			store.setSessions(directory, sessions)
+			store.setSessionReady(directory, true)
+		} catch (error) {
+			// Network error or server not running - this is expected during dev
+			// Don't spam the user, just log it
+			console.warn(
+				"[OpenCode] Failed to load sessions:",
+				error instanceof Error ? error.message : error,
+			)
+			// Still mark as ready so UI doesn't hang
+			store.setSessionReady(directory, true)
+		}
 
-			// Load session statuses
+		// Load session statuses separately (non-critical)
+		try {
 			const statusResponse = await client.session.status()
 			if (statusResponse.data) {
 				for (const [sessionID, status] of Object.entries(statusResponse.data)) {
@@ -100,58 +115,65 @@ export function OpenCodeProvider({ url, directory, children }: OpenCodeProviderP
 					})
 				}
 			}
-
-			store.setSessionReady(directory, true)
 		} catch (error) {
-			console.error("Bootstrap failed:", error)
+			// Status fetch failed - not critical, SSE will update statuses
+			console.warn(
+				"[OpenCode] Failed to load statuses:",
+				error instanceof Error ? error.message : error,
+			)
 		}
 	}, [directory, store])
 
 	/**
 	 * Sync a specific session (messages + parts + todos + diffs)
+	 *
+	 * Uses Promise.allSettled to fetch all data in parallel,
+	 * gracefully handling partial failures.
 	 */
 	const sync = useCallback(
 		async (sessionID: string) => {
 			const client = clientRef.current
 
-			try {
-				const [messagesResponse, todoResponse, diffResponse] = await Promise.all([
-					client.session.messages({
-						path: { id: sessionID },
-						query: { limit: 100 },
-					}),
-					client.session.todo({ path: { id: sessionID } }),
-					client.session.diff({ path: { id: sessionID } }),
-				])
+			// Fetch all data in parallel, handling failures individually
+			const [messagesResult, todoResult, diffResult] = await Promise.allSettled([
+				client.session.messages({
+					path: { id: sessionID },
+					query: { limit: 100 },
+				}),
+				client.session.todo({ path: { id: sessionID } }),
+				client.session.diff({ path: { id: sessionID } }),
+			])
 
-				// Set messages (sorted by ID)
-				if (messagesResponse.data) {
-					const messages = messagesResponse.data.map((m: any) => m.info)
-					store.setMessages(directory, sessionID, messages)
+			// Process messages (most important)
+			if (messagesResult.status === "fulfilled" && messagesResult.value.data) {
+				const messages = messagesResult.value.data.map((m: any) => m.info)
+				store.setMessages(directory, sessionID, messages)
 
-					// Set parts for each message
-					for (const msg of messagesResponse.data) {
-						store.setParts(directory, msg.info.id, msg.parts as any)
-					}
+				// Set parts for each message
+				for (const msg of messagesResult.value.data) {
+					store.setParts(directory, msg.info.id, msg.parts as any)
 				}
+			} else if (messagesResult.status === "rejected") {
+				console.warn(
+					"[OpenCode] Failed to sync messages:",
+					messagesResult.reason?.message ?? messagesResult.reason,
+				)
+			}
 
-				// Set todos
-				if (todoResponse.data) {
-					store.handleEvent(directory, {
-						type: "todo.updated",
-						properties: { sessionID, todos: todoResponse.data },
-					})
-				}
+			// Process todos (non-critical)
+			if (todoResult.status === "fulfilled" && todoResult.value.data) {
+				store.handleEvent(directory, {
+					type: "todo.updated",
+					properties: { sessionID, todos: todoResult.value.data },
+				})
+			}
 
-				// Set diffs
-				if (diffResponse.data) {
-					store.handleEvent(directory, {
-						type: "session.diff",
-						properties: { sessionID, diff: diffResponse.data },
-					})
-				}
-			} catch (error) {
-				console.error("Sync failed:", error)
+			// Process diffs (non-critical)
+			if (diffResult.status === "fulfilled" && diffResult.value.data) {
+				store.handleEvent(directory, {
+					type: "session.diff",
+					properties: { sessionID, diff: diffResult.value.data },
+				})
 			}
 		},
 		[directory, store],
