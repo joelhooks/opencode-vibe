@@ -388,3 +388,19 @@ pre::-webkit-scrollbar-thumb {
 pre::-webkit-scrollbar-thumb:hover {
   background: var(--muted-foreground);
 }
+
+/* Surfer loader animation - subtle wave riding */
+@keyframes surf {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-4px) rotate(2deg);
+  }
+}
+
+.animate-surf {
+  animation: surf 1.5s ease-in-out infinite;
+  display: inline-block;
+}
