@@ -162,7 +162,7 @@ export type ToolProps = ComponentProps<typeof Collapsible> & {
 	toolPart?: ToolPart
 }
 
-export const Tool = ({ className, toolPart, children, ...props }: ToolProps) => {
+const ToolComponent = ({ className, toolPart, children, ...props }: ToolProps) => {
 	// If toolPart provided, use enhanced ToolCard rendering
 	if (toolPart) {
 		return <ToolCard toolPart={toolPart} className={className} {...props} />
@@ -178,6 +178,41 @@ export const Tool = ({ className, toolPart, children, ...props }: ToolProps) => 
 		</Collapsible>
 	)
 }
+
+/**
+ * Memoized Tool component with content-aware comparison.
+ *
+ * Problem: Immer creates new object references on every store update,
+ * breaking React.memo shallow comparison even when content is identical.
+ *
+ * Solution: Compare actual content instead of references.
+ * For OpenCode ToolPart: compare id, status, and metadata.
+ * For AI SDK tools: compare children.
+ */
+export const Tool = React.memo(ToolComponent, (prev, next) => {
+	// Compare toolPart if provided (OpenCode tools)
+	if (prev.toolPart && next.toolPart) {
+		if (prev.toolPart.id !== next.toolPart.id) return false
+		if (prev.toolPart.state.status !== next.toolPart.state.status) return false
+
+		// Compare input and output when available
+		const prevInput = "input" in prev.toolPart.state ? prev.toolPart.state.input : undefined
+		const nextInput = "input" in next.toolPart.state ? next.toolPart.state.input : undefined
+		if (JSON.stringify(prevInput) !== JSON.stringify(nextInput)) return false
+
+		const prevOutput = "output" in prev.toolPart.state ? prev.toolPart.state.output : undefined
+		const nextOutput = "output" in next.toolPart.state ? next.toolPart.state.output : undefined
+		if (JSON.stringify(prevOutput) !== JSON.stringify(nextOutput)) return false
+
+		return true
+	}
+
+	// One has toolPart, other doesn't - not equal
+	if (prev.toolPart !== next.toolPart) return false
+
+	// AI SDK tools - compare children
+	return prev.children === next.children
+})
 
 /**
  * Check if a tool state has expandable content (output or error).

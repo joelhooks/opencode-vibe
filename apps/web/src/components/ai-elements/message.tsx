@@ -158,7 +158,7 @@ export type MessageProps = HTMLAttributes<HTMLDivElement> & {
 	from: UIMessage["role"]
 }
 
-export const Message = ({ className, from, ...props }: MessageProps) => (
+const MessageComponent = ({ className, from, ...props }: MessageProps) => (
 	<div
 		className={cn(
 			"group flex w-full max-w-[95%] flex-col gap-2",
@@ -168,6 +168,18 @@ export const Message = ({ className, from, ...props }: MessageProps) => (
 		{...props}
 	/>
 )
+
+/**
+ * Memoized Message component with content-aware comparison.
+ *
+ * Problem: Immer creates new object references on every store update,
+ * breaking React.memo shallow comparison even when content is identical.
+ *
+ * Solution: Compare actual content (from, children) instead of references.
+ */
+export const Message = React.memo(MessageComponent, (prev, next) => {
+	return prev.from === next.from && prev.children === next.children
+})
 
 export type MessageContentProps = HTMLAttributes<HTMLDivElement>
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useEffect, useMemo } from "react"
+import { Fragment, useMemo } from "react"
 import type { UIMessage, ChatStatus } from "ai"
 import { useMessagesWithParts } from "@/react/use-messages-with-parts"
 import { useSessionStatus } from "@/react/use-session-status"
@@ -49,18 +49,19 @@ export function SessionMessages({
 	initialStoreParts,
 	status: externalStatus,
 }: SessionMessagesProps) {
-	// Hydrate store on mount with server-fetched data
-	// CRITICAL: Must happen BEFORE SSE events start arriving
-	// Empty deps = runs once on mount only
-	// biome-ignore lint/correctness/useExhaustiveDependencies: Intentional - hydrate once on mount with initial prop values
-	useEffect(() => {
-		const store = useOpencodeStore.getState()
-		// Use directory from props or fallback to session's directory
-		const targetDirectory = directory || "/"
+	// Hydrate store synchronously BEFORE first render
+	// This is intentionally a side effect during render to avoid flash of empty state
+	// The store hydration is idempotent - it only hydrates if not already hydrated
+	const targetDirectory = directory || "/"
+	const store = useOpencodeStore.getState()
+	const isHydrated = store.directories[targetDirectory]?.messages[sessionId]?.length > 0
+
+	if (!isHydrated && initialStoreMessages.length > 0) {
 		store.hydrateMessages(targetDirectory, sessionId, initialStoreMessages, initialStoreParts)
-	}, []) // Empty deps - run once on mount
+	}
 
 	// Get messages with parts from Zustand store (updated by useMultiServerSSE)
+	// Now this hook reads from already-hydrated store on first render
 	const storeMessages = useMessagesWithParts(sessionId)
 
 	// Get session status from store
