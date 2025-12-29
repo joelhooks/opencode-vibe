@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useEffect, useMemo, useState } from "react"
+import { Fragment, useEffect, useMemo } from "react"
 import type { UIMessage, ChatStatus } from "ai"
 import { useMessagesWithParts } from "@/react/use-messages-with-parts"
 import { useSessionStatus } from "@/react/use-session-status"
@@ -52,15 +52,13 @@ export function SessionMessages({
 	// Hydrate store on mount with server-fetched data
 	// CRITICAL: Must happen BEFORE SSE events start arriving
 	// Empty deps = runs once on mount only
+	// biome-ignore lint/correctness/useExhaustiveDependencies: Intentional - hydrate once on mount with initial prop values
 	useEffect(() => {
 		const store = useOpencodeStore.getState()
 		// Use directory from props or fallback to session's directory
 		const targetDirectory = directory || "/"
 		store.hydrateMessages(targetDirectory, sessionId, initialStoreMessages, initialStoreParts)
 	}, []) // Empty deps - run once on mount
-
-	// Track if we've received store updates (to know when to switch from initial to store data)
-	const [hasStoreData, setHasStoreData] = useState(false)
 
 	// Get messages with parts from Zustand store (updated by useMultiServerSSE)
 	const storeMessages = useMessagesWithParts(sessionId)
@@ -74,16 +72,9 @@ export function SessionMessages({
 		return transformMessages(storeMessages)
 	}, [storeMessages])
 
-	// Switch to store data once we have it
-	useEffect(() => {
-		if (storeMessages.length > 0 && !hasStoreData) {
-			setHasStoreData(true)
-		}
-	}, [storeMessages.length, hasStoreData])
-
 	// Use store messages if available, otherwise fall back to initial messages
 	// This ensures we show initial SSR data until real-time updates arrive
-	const messages = hasStoreData ? transformedStoreMessages : initialMessages
+	const messages = storeMessages.length > 0 ? transformedStoreMessages : initialMessages
 
 	// Determine status: external (from parent) > running (from store) > ready
 	const status: ChatStatus = externalStatus ?? (running ? "streaming" : "ready")
