@@ -1,20 +1,15 @@
-# ADR 002: Effect-Powered Router for Type-Safe Async Operations
+# ADR 002: @opencode/router - Effect-Powered Async Router
 
-**Status:** Proposed  
-**Date:** 2025-12-28  
-**Deciders:** Joel Hooks, Architecture Team  
-**Affected Components:** All server-side async operations
+**Status:** Approved  
+**Date:** 2025-12-29
 
 ---
 
-## Executive Summary
+## TL;DR
 
-We will build a **type-safe router abstraction** powered by Effect-TS internally. Users define routes with a fluent builder API—no Effect knowledge required. The router handles retry, timeout, concurrency, and streaming declaratively. Effect runs under the hood, invisible to consumers.
-
-**This is the UploadThing pattern applied to our entire async surface area.**
+Build `@opencode/router` - a type-safe router where handlers are async/await, config is declarative, and Effect runs invisibly underneath. Steal the UploadThing pattern wholesale.
 
 ```typescript
-// What users write (no Effect)
 const o = createOpencodeRoute();
 
 export const routes = {
@@ -22,158 +17,67 @@ export const routes = {
     .input(z.object({ id: z.string() }))
     .handler(async ({ input, sdk }) => sdk.session.get(input.id)),
 
-  subscribeToEvents: o({ retry: "exponential", stream: true }).handler(
-    async function* ({ sdk }) {
-      for await (const event of sdk.global.event()) {
-        yield event;
-      }
-    },
-  ),
+  subscribe: o({
+    stream: true,
+    retry: "exponential",
+    heartbeat: "60s",
+  }).handler(async function* ({ sdk }) {
+    for await (const event of sdk.global.event()) yield event;
+  }),
 } satisfies OpencodeRouter;
-
-// What runs internally (full Effect)
-// - Retry policies via Effect.retry + Schedule
-// - Timeouts via Effect.timeout
-// - Streaming via Effect.Stream
-// - Concurrency via Effect.forEach with { concurrency: N }
-// - Typed errors via Effect<A, E, R>
 ```
 
 ---
 
-## Context
+## Current Async Inventory
 
-### The Problem
+Before building, know what exists. This is the complete async surface area:
 
-OpenCode has 2000+ lines of manual async orchestration:
+### Server-Side (Router Scope)
 
-| Component        | Lines | Pain Points                                               |
-| ---------------- | ----- | --------------------------------------------------------- |
-| SSE Handling     | 796   | Manual reconnection, heartbeat, multi-server coordination |
-| Message Queue    | 208   | Race conditions, backpressure, state sync                 |
-| Server Discovery | 150+  | Timeout handling, parallel requests, error accumulation   |
+| File                                             | Lines | Patterns                                             | Router Coverage                                            |
+| ------------------------------------------------ | ----- | ---------------------------------------------------- | ---------------------------------------------------------- |
+| `apps/web/src/app/api/opencode-servers/route.ts` | 150+  | Timeout (2s), concurrency (5), parallel fetch        | `{ concurrency: 5, timeout: "2s" }`                        |
+| `apps/web/src/react/use-sse.tsx`                 | 342   | Exponential backoff, heartbeat (60s), visibility API | `{ stream: true, retry: "exponential", heartbeat: "60s" }` |
+| `apps/web/src/core/multi-server-sse.ts`          | 454   | Polling (5s), per-server SSE, merge streams          | Discovery route + streaming route                          |
+| `apps/web/src/react/use-send-message.ts`         | 208   | FIFO queue, session status gating                    | `{ timeout: "30s" }` for send, queue logic stays in hook   |
+| `apps/web/src/react/use-create-session.ts`       | 116   | Simple async/await                                   | `{ timeout: "60s" }`                                       |
+| `apps/web/src/react/use-file-search.ts`          | 115   | Debounced fetch (150ms)                              | `{ timeout: "5s" }`                                        |
+| `apps/web/src/react/use-providers.ts`            | 94    | useEffect fetch, cancellation                        | `{ timeout: "30s", cache: { ttl: "30s" } }`                |
 
-Every async operation reinvents:
+### Client-Side (NOT Router Scope)
 
-- Retry with exponential backoff
-- Timeout handling with AbortController
-- Concurrency limiting
-- Error recovery
-- Streaming with reconnection
+These stay as React hooks - they're client-side concerns:
 
-**The code is correct but unmaintainable.** Each pattern is hand-rolled, tested in isolation, and subtly different.
+| Pattern                                  | Location                  | Why Not Router                    |
+| ---------------------------------------- | ------------------------- | --------------------------------- |
+| Event batching (16ms debounce)           | `use-sse.tsx:209-243`     | Render optimization               |
+| Visibility API (pause on background)     | `use-sse.tsx:410-435`     | Browser API                       |
+| Session status gating (queue until idle) | `use-send-message.ts:134` | Business logic                    |
+| Binary search updates                    | `store.ts`                | State management                  |
+| FIFO message queue                       | `use-send-message.ts`     | Application logic wrapping router |
 
-### The Insight
+### State Management (NOT Router Scope)
 
-UploadThing solved this exact problem. They use Effect internally but expose a clean builder API:
-
-```typescript
-// UploadThing's public API - no Effect knowledge needed
-const f = createUploadthing();
-
-export const uploadRouter = {
-  imageUploader: f({ image: { maxFileSize: "4MB" } })
-    .middleware(async ({ req }) => ({ userId: getUserId(req) }))
-    .onUploadComplete(async ({ file }) => saveToDb(file)),
-} satisfies FileRouter;
-```
-
-Internally, UploadThing uses:
-
-- `Effect.gen` for async orchestration ([handler.ts:103-150](https://github.com/pingdotgg/uploadthing/blob/main/packages/uploadthing/src/_internal/handler.ts#L103-L150))
-- `Context.Tag` for dependency injection ([handler.ts:50-52](https://github.com/pingdotgg/uploadthing/blob/main/packages/uploadthing/src/_internal/handler.ts#L50-L52))
-- `Schema` for runtime validation ([handler.ts:128-143](https://github.com/pingdotgg/uploadthing/blob/main/packages/uploadthing/src/_internal/handler.ts#L128-L143))
-- `@effect/platform` for HTTP handling ([handler.ts:1-15](https://github.com/pingdotgg/uploadthing/blob/main/packages/uploadthing/src/_internal/handler.ts#L1-L15))
-
-**We will apply this pattern to all OpenCode async operations.**
+| File                          | Purpose                                |
+| ----------------------------- | -------------------------------------- |
+| `apps/web/src/react/store.ts` | Zustand + Immer, binary search updates |
+| `apps/web/src/core/client.ts` | SDK client factory, session routing    |
 
 ---
 
-## Decision
-
-### Build an Effect-Powered Router
-
-We will create `@opencode/router` - a type-safe router where:
-
-1. **Users write handlers with async/await** - No Effect syntax
-2. **Route config declares behavior** - `{ timeout, retry, concurrency, stream }`
-3. **Effect executes internally** - Retry, timeout, streaming, error handling
-4. **Types flow end-to-end** - Input → Handler → Output fully inferred
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         ROUTER ARCHITECTURE                              │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                    PUBLIC API (No Effect)                          │ │
-│  │                                                                    │ │
-│  │  const o = createOpencodeRoute()                                  │ │
-│  │                                                                    │ │
-│  │  // Request-Response                                              │ │
-│  │  getSession: o({ timeout: "30s" })                                │ │
-│  │    .input(z.object({ id: z.string() }))                           │ │
-│  │    .handler(async ({ input, sdk }) => ...)                        │ │
-│  │                                                                    │ │
-│  │  // Streaming                                                      │ │
-│  │  subscribe: o({ retry: "exponential", stream: true })             │ │
-│  │    .handler(async function* ({ sdk }) { yield* events })          │ │
-│  │                                                                    │ │
-│  │  // Concurrent                                                     │ │
-│  │  discoverServers: o({ concurrency: 5, timeout: "2s" })            │ │
-│  │    .input(z.object({ ports: z.array(z.number()) }))               │ │
-│  │    .handler(async ({ input }) => checkPorts(input.ports))         │ │
-│  │                                                                    │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-│                                    │                                     │
-│                                    ▼                                     │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                    ROUTER RUNTIME (Effect)                         │ │
-│  │                                                                    │ │
-│  │  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌───────────┐ │ │
-│  │  │ Route Parser │ │ Config       │ │ Executor     │ │ Response  │ │ │
-│  │  │              │ │ Resolver     │ │              │ │ Encoder   │ │ │
-│  │  │ Zod → Schema │ │              │ │ Effect.gen   │ │           │ │ │
-│  │  │ validation   │ │ timeout →    │ │ with retry,  │ │ JSON or   │ │ │
-│  │  │              │ │ Effect.timeout│ │ timeout,     │ │ Stream    │ │ │
-│  │  │              │ │              │ │ concurrency  │ │           │ │ │
-│  │  │              │ │ retry →      │ │              │ │           │ │ │
-│  │  │              │ │ Schedule.*   │ │              │ │           │ │ │
-│  │  │              │ │              │ │              │ │           │ │ │
-│  │  │              │ │ stream →     │ │              │ │           │ │ │
-│  │  │              │ │ Stream.*     │ │              │ │           │ │ │
-│  │  └──────────────┘ └──────────────┘ └──────────────┘ └───────────┘ │ │
-│  │                                                                    │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-│                                    │                                     │
-│                                    ▼                                     │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                    FRAMEWORK ADAPTERS                              │ │
-│  │                                                                    │ │
-│  │  Next.js API Route    Server Action    Direct Call                │ │
-│  │  createNextHandler()  createAction()   router.call()              │ │
-│  │                                                                    │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Router API Design
-
-### Route Configuration
+## Route Configuration
 
 ```typescript
 type RouteConfig = {
-  // Timeout - how long before we give up
+  // Timeout - abort after duration
   timeout?: Duration; // "5s", "30s", "2m"
 
   // Retry - how to handle failures
   retry?:
     | "none"
-    | "exponential" // 1s, 2s, 4s, 8s... up to 30s
-    | "linear" // 1s, 2s, 3s, 4s...
+    | "exponential" // 1s, 2s, 4s, 8s... capped at 30s
+    | "linear" // 1s, 2s, 3s, 4s... capped at 30s
     | {
         type: "exponential" | "linear";
         maxRetries?: number;
@@ -187,6 +91,10 @@ type RouteConfig = {
   // Streaming - for SSE/real-time
   stream?: boolean;
 
+  // Heartbeat - for streaming routes, reconnect if no event in duration
+  // Server sends heartbeat every 30s, client expects event within 60s
+  heartbeat?: Duration; // "60s" default for streaming
+
   // Cache - for repeated calls
   cache?: {
     ttl: Duration;
@@ -195,53 +103,544 @@ type RouteConfig = {
 };
 ```
 
-### Builder API
+---
+
+## Package Structure
+
+```
+packages/router/
+├── src/
+│   ├── builder.ts          # createOpencodeRoute() fluent API
+│   ├── router.ts           # createRouter(), route resolution
+│   ├── executor.ts         # Effect execution engine
+│   ├── stream.ts           # Streaming + heartbeat support
+│   ├── errors.ts           # Typed error classes
+│   ├── runtime.ts          # ManagedRuntime setup
+│   ├── schedule.ts         # Retry schedule builders
+│   ├── adapters/
+│   │   ├── next.ts         # createNextHandler(), createAction()
+│   │   └── direct.ts       # createCaller()
+│   ├── types.ts            # Public types
+│   └── index.ts            # Public exports
+├── effect.ts               # @opencode/router/effect escape hatch
+├── package.json
+└── tsconfig.json
+
+packages/router-react/
+├── src/
+│   ├── use-subscription.ts # Streaming hook with visibility API
+│   ├── use-query.ts        # Request-response hook
+│   └── index.ts
+└── package.json
+```
+
+---
+
+## Implementation Spec
+
+### 1. Builder API (`builder.ts`)
 
 ```typescript
-// Create a route builder
-const o = createOpencodeRoute();
+import { z } from "zod";
 
-// Basic route
-const getSession = o({ timeout: "30s" })
-  .input(z.object({ id: z.string() }))
-  .handler(async ({ input, sdk, signal }) => {
-    return sdk.session.get(input.id);
-  });
+type Duration = `${number}${"ms" | "s" | "m" | "h"}`;
 
-// Route with middleware
-const protectedRoute = o({ timeout: "30s" })
-  .input(z.object({ id: z.string() }))
-  .middleware(async ({ sdk }) => {
-    const user = await sdk.auth.getCurrentUser();
-    if (!user) throw new UnauthorizedError();
-    return { user };
-  })
-  .handler(async ({ input, ctx, sdk }) => {
-    // ctx.user is available from middleware
-    return sdk.session.get(input.id);
-  });
+interface RouteConfig {
+  timeout?: Duration;
+  retry?: RetryConfig;
+  concurrency?: number | "unbounded";
+  stream?: boolean;
+  heartbeat?: Duration;
+  cache?: { ttl: Duration; key?: (input: unknown) => string };
+}
 
-// Streaming route
-const subscribe = o({ retry: "exponential", stream: true }).handler(
-  async function* ({ sdk, signal }) {
-    const events = sdk.global.event();
-    for await (const event of events) {
-      if (signal.aborted) break;
-      yield event;
+interface RouteBuilder<TInput, TOutput, TCtx> {
+  input<T extends z.ZodType>(
+    schema: T,
+  ): RouteBuilder<z.infer<T>, TOutput, TCtx>;
+  middleware<T>(
+    fn: (ctx: TCtx) => Promise<T>,
+  ): RouteBuilder<TInput, TOutput, TCtx & T>;
+  handler(fn: HandlerFn<TInput, TOutput, TCtx>): Route<TInput, TOutput>;
+  onError(fn: ErrorHandler): RouteBuilder<TInput, TOutput, TCtx>;
+}
+
+type HandlerFn<TInput, TOutput, TCtx> =
+  | ((ctx: HandlerContext<TInput, TCtx>) => Promise<TOutput>)
+  | ((ctx: HandlerContext<TInput, TCtx>) => AsyncGenerator<TOutput>);
+
+interface HandlerContext<TInput, TCtx> {
+  input: TInput;
+  sdk: OpencodeClient;
+  signal: AbortSignal;
+  ctx: TCtx;
+}
+
+export function createOpencodeRoute() {
+  return function o<TConfig extends RouteConfig>(config: TConfig) {
+    return {
+      input<T extends z.ZodType>(schema: T) {
+        return this as RouteBuilder<z.infer<T>, unknown, {}>;
+      },
+      middleware<T>(fn: (ctx: {}) => Promise<T>) {
+        return this as RouteBuilder<unknown, unknown, T>;
+      },
+      handler<TOutput>(fn: HandlerFn<unknown, TOutput, {}>) {
+        return {
+          _config: config,
+          _inputSchema: undefined,
+          _middleware: [],
+          _handler: fn,
+          _errorHandler: undefined,
+        } as Route<unknown, TOutput>;
+      },
+      onError(fn: ErrorHandler) {
+        return this;
+      },
+    };
+  };
+}
+```
+
+### 2. Executor (`executor.ts`)
+
+```typescript
+import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
+import * as Schedule from "effect/Schedule";
+import * as Duration from "effect/Duration";
+
+export const executeRoute = <TInput, TOutput>(
+  route: Route<TInput, TOutput>,
+  input: TInput,
+  ctx: RouteContext,
+): Effect.Effect<TOutput, RouteError, RouterEnv> =>
+  Effect.gen(function* () {
+    // 1. Validate input
+    const validatedInput = route._inputSchema
+      ? yield* validateInput(route._inputSchema, input)
+      : input;
+
+    // 2. Run middleware chain
+    let middlewareCtx = {};
+    for (const mw of route._middleware) {
+      const result = yield* Effect.tryPromise({
+        try: () => mw({ ...ctx, ctx: middlewareCtx }),
+        catch: (e) => new MiddlewareError({ cause: e }),
+      });
+      middlewareCtx = { ...middlewareCtx, ...result };
     }
-  },
-);
 
-// Batch route with concurrency
-const checkServers = o({ concurrency: 5, timeout: "2s" })
-  .input(z.object({ ports: z.array(z.number()) }))
-  .handler(async ({ input }) => {
-    // Router automatically parallelizes with concurrency limit
-    return Promise.all(input.ports.map(checkPort));
+    // 3. Build handler context
+    const handlerCtx = {
+      input: validatedInput,
+      sdk: ctx.sdk,
+      signal: ctx.signal,
+      ctx: middlewareCtx,
+    };
+
+    // 4. Execute based on route type
+    if (route._config.stream) {
+      return yield* executeStreamHandler(route, handlerCtx);
+    } else {
+      return yield* executeRequestHandler(route, handlerCtx);
+    }
+  });
+
+const executeRequestHandler = <TInput, TOutput>(
+  route: Route<TInput, TOutput>,
+  ctx: HandlerContext<TInput, unknown>,
+): Effect.Effect<TOutput, RouteError, RouterEnv> => {
+  let effect = Effect.tryPromise({
+    try: () => route._handler(ctx) as Promise<TOutput>,
+    catch: (e) => new HandlerError({ cause: e }),
+  });
+
+  // Apply timeout
+  if (route._config.timeout) {
+    effect = effect.pipe(
+      Effect.timeout(parseDuration(route._config.timeout)),
+      Effect.catchTag("TimeoutException", () =>
+        Effect.fail(new TimeoutError({ duration: route._config.timeout })),
+      ),
+    );
+  }
+
+  // Apply retry
+  if (route._config.retry && route._config.retry !== "none") {
+    effect = effect.pipe(Effect.retry(buildSchedule(route._config.retry)));
+  }
+
+  return effect;
+};
+
+const executeStreamHandler = <TInput, TOutput>(
+  route: Route<TInput, TOutput>,
+  ctx: HandlerContext<TInput, unknown>,
+): Effect.Effect<Stream.Stream<TOutput, RouteError>, RouteError, RouterEnv> =>
+  Effect.gen(function* () {
+    const generator = route._handler(ctx) as AsyncGenerator<TOutput>;
+
+    let stream = Stream.fromAsyncIterable(
+      generator,
+      (e) => new StreamError({ cause: e }),
+    );
+
+    // Apply heartbeat timeout (reconnect if no event in duration)
+    if (route._config.heartbeat) {
+      const heartbeatDuration = parseDuration(route._config.heartbeat);
+      stream = stream.pipe(
+        Stream.timeoutFail({
+          duration: heartbeatDuration,
+          onTimeout: () =>
+            new HeartbeatTimeoutError({ duration: route._config.heartbeat }),
+        }),
+      );
+    }
+
+    // Apply retry (reconnects on heartbeat timeout or connection error)
+    if (route._config.retry && route._config.retry !== "none") {
+      stream = stream.pipe(Stream.retry(buildSchedule(route._config.retry)));
+    }
+
+    // Interrupt on abort signal
+    stream = stream.pipe(
+      Stream.interruptWhen(
+        Effect.async<never, never>((resume) => {
+          ctx.signal.addEventListener("abort", () => resume(Effect.void));
+        }),
+      ),
+    );
+
+    return stream;
   });
 ```
 
-### Router Definition
+### 3. Schedule Builder (`schedule.ts`)
+
+```typescript
+import * as Schedule from "effect/Schedule";
+import * as Duration from "effect/Duration";
+
+type RetryConfig =
+  | "none"
+  | "exponential"
+  | "linear"
+  | {
+      type: "exponential" | "linear";
+      maxRetries?: number;
+      maxDuration?: Duration;
+      retryIf?: (error: unknown) => boolean;
+    };
+
+export const buildSchedule = (
+  retry: RetryConfig,
+): Schedule.Schedule<unknown, unknown> => {
+  if (retry === "none") {
+    return Schedule.stop;
+  }
+
+  if (retry === "exponential") {
+    return Schedule.exponential("1 second").pipe(
+      Schedule.either(Schedule.spaced("30 seconds")), // Cap at 30s
+      Schedule.upTo(10), // Max 10 retries
+    );
+  }
+
+  if (retry === "linear") {
+    return Schedule.spaced("1 second").pipe(
+      Schedule.upTo(30), // Max 30 retries (30s total)
+    );
+  }
+
+  // Custom config
+  const base =
+    retry.type === "exponential"
+      ? Schedule.exponential("1 second")
+      : Schedule.spaced("1 second");
+
+  let schedule = base;
+
+  if (retry.maxRetries) {
+    schedule = schedule.pipe(Schedule.upTo(retry.maxRetries));
+  }
+
+  if (retry.maxDuration) {
+    schedule = schedule.pipe(
+      Schedule.either(Schedule.spaced(parseDuration(retry.maxDuration))),
+    );
+  }
+
+  if (retry.retryIf) {
+    schedule = schedule.pipe(
+      Schedule.whileInput((err: unknown) => retry.retryIf!(err)),
+    );
+  }
+
+  return schedule;
+};
+```
+
+### 4. Typed Errors (`errors.ts`)
+
+```typescript
+import { Data } from "effect";
+
+export class RouteError extends Data.TaggedError("RouteError")<{
+  route?: string;
+  cause: unknown;
+}> {}
+
+export class ValidationError extends Data.TaggedError("ValidationError")<{
+  route?: string;
+  issues: z.ZodIssue[];
+}> {}
+
+export class TimeoutError extends Data.TaggedError("TimeoutError")<{
+  route?: string;
+  duration: string;
+}> {}
+
+export class HandlerError extends Data.TaggedError("HandlerError")<{
+  route?: string;
+  cause: unknown;
+}> {}
+
+export class StreamError extends Data.TaggedError("StreamError")<{
+  route?: string;
+  cause: unknown;
+}> {}
+
+export class HeartbeatTimeoutError extends Data.TaggedError(
+  "HeartbeatTimeoutError",
+)<{
+  route?: string;
+  duration: string;
+}> {}
+
+export class MiddlewareError extends Data.TaggedError("MiddlewareError")<{
+  route?: string;
+  cause: unknown;
+}> {}
+```
+
+### 5. Next.js Adapter (`adapters/next.ts`)
+
+```typescript
+import { ManagedRuntime, Layer, Context } from "effect";
+import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
+
+export class RouterEnv extends Context.Tag("RouterEnv")<
+  RouterEnv,
+  {
+    sdk: OpencodeClient;
+    signal: AbortSignal;
+  }
+>() {}
+
+export const createNextHandler = <TRouter extends Router>(opts: {
+  router: TRouter;
+  createContext?: (req: Request) => Promise<{ sdk: OpencodeClient }>;
+}) => {
+  return async (req: Request) => {
+    const controller = new AbortController();
+
+    // Abort on client disconnect
+    req.signal.addEventListener("abort", () => controller.abort());
+
+    const ctx = opts.createContext
+      ? await opts.createContext(req)
+      : { sdk: createDefaultClient() };
+
+    const layer = Layer.succeed(RouterEnv, {
+      sdk: ctx.sdk,
+      signal: controller.signal,
+    });
+
+    const runtime = ManagedRuntime.make(layer);
+
+    try {
+      const path = getRoutePath(req);
+      const route = opts.router.resolve(path);
+      const input = await parseInput(req, route);
+
+      const result = await runtime.runPromise(
+        executeRoute(route, input, { sdk: ctx.sdk, signal: controller.signal }),
+      );
+
+      if (route._config.stream) {
+        // Convert Effect.Stream to ReadableStream
+        const readable = streamToReadable(
+          result as Stream.Stream<unknown, unknown>,
+        );
+        return new Response(readable, {
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+          },
+        });
+      }
+
+      return Response.json(result);
+    } catch (error) {
+      return handleRouteError(error);
+    }
+  };
+};
+
+export const createAction = <TInput, TOutput>(
+  route: Route<TInput, TOutput>,
+): ((input: TInput) => Promise<TOutput>) => {
+  return async (input: TInput) => {
+    const controller = new AbortController();
+    const sdk = createDefaultClient();
+
+    const layer = Layer.succeed(RouterEnv, {
+      sdk,
+      signal: controller.signal,
+    });
+
+    const runtime = ManagedRuntime.make(layer);
+
+    if (route._config.stream) {
+      // Return AsyncIterable for streaming routes
+      const stream = await runtime.runPromise(
+        executeRoute(route, input, { sdk, signal: controller.signal }),
+      );
+      return streamToAsyncIterable(stream) as TOutput;
+    }
+
+    return runtime.runPromise(
+      executeRoute(route, input, { sdk, signal: controller.signal }),
+    );
+  };
+};
+```
+
+### 6. React Hook (`router-react/use-subscription.ts`)
+
+```typescript
+import { useState, useEffect, useRef, useCallback } from "react";
+
+type SubscriptionStatus =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "error"
+  | "paused";
+
+interface UseSubscriptionOptions {
+  /** Pause when tab is hidden (default: true) */
+  pauseOnHidden?: boolean;
+  /** Batch events for N ms before updating state (default: 16) */
+  batchMs?: number;
+}
+
+export function useSubscription<T>(
+  action: () => AsyncIterable<T>,
+  deps: unknown[],
+  options: UseSubscriptionOptions = {},
+) {
+  const { pauseOnHidden = true, batchMs = 16 } = options;
+
+  const [events, setEvents] = useState<T[]>([]);
+  const [status, setStatus] = useState<SubscriptionStatus>("idle");
+  const [error, setError] = useState<Error | null>(null);
+
+  const controllerRef = useRef<AbortController | null>(null);
+  const batchRef = useRef<T[]>([]);
+  const batchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const flushBatch = useCallback(() => {
+    if (batchRef.current.length > 0) {
+      setEvents((prev) => [...prev, ...batchRef.current]);
+      batchRef.current = [];
+    }
+    batchTimeoutRef.current = null;
+  }, []);
+
+  const queueEvent = useCallback(
+    (event: T) => {
+      batchRef.current.push(event);
+      if (!batchTimeoutRef.current) {
+        batchTimeoutRef.current = setTimeout(flushBatch, batchMs);
+      }
+    },
+    [batchMs, flushBatch],
+  );
+
+  useEffect(() => {
+    controllerRef.current = new AbortController();
+    let isPaused = false;
+
+    async function subscribe() {
+      setStatus("connecting");
+      setError(null);
+
+      try {
+        const iterable = action();
+        setStatus("connected");
+
+        for await (const event of iterable) {
+          if (controllerRef.current?.signal.aborted) break;
+          if (isPaused) continue; // Skip events while paused
+          queueEvent(event);
+        }
+      } catch (err) {
+        if (!controllerRef.current?.signal.aborted) {
+          setError(err instanceof Error ? err : new Error(String(err)));
+          setStatus("error");
+        }
+      }
+    }
+
+    // Visibility API integration
+    function handleVisibilityChange() {
+      if (!pauseOnHidden) return;
+
+      if (document.visibilityState === "hidden") {
+        isPaused = true;
+        setStatus("paused");
+      } else {
+        isPaused = false;
+        setStatus("connected");
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    subscribe();
+
+    return () => {
+      controllerRef.current?.abort();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (batchTimeoutRef.current) {
+        clearTimeout(batchTimeoutRef.current);
+        flushBatch();
+      }
+    };
+  }, deps);
+
+  const reconnect = useCallback(() => {
+    controllerRef.current?.abort();
+    setEvents([]);
+    // Re-run effect by updating a dep (or use a key pattern)
+  }, []);
+
+  return {
+    events,
+    status,
+    error,
+    connected: status === "connected",
+    reconnect,
+  };
+}
+```
+
+---
+
+## Router Definition Example
 
 ```typescript
 // apps/web/src/server/router.ts
@@ -262,13 +661,13 @@ export const appRouter = createRouter({
     ),
 
     create: o({ timeout: "60s" })
-      .input(z.object({ provider: z.string() }))
+      .input(z.object({ provider: z.string().optional() }))
       .handler(async ({ input, sdk }) => sdk.session.create(input)),
   },
 
   // Real-time subscriptions
   subscribe: {
-    events: o({ retry: "exponential", stream: true })
+    events: o({ stream: true, retry: "exponential", heartbeat: "60s" })
       .input(z.object({ directory: z.string() }))
       .handler(async function* ({ input, sdk }) {
         for await (const event of sdk.global.event()) {
@@ -278,508 +677,19 @@ export const appRouter = createRouter({
         }
       }),
 
-    messages: o({ retry: "exponential", stream: true })
-      .input(z.object({ sessionId: z.string() }))
+    multiServer: o({ stream: true, retry: "exponential", heartbeat: "60s" })
+      .input(z.object({ servers: z.array(z.string()) }))
       .handler(async function* ({ input, sdk }) {
-        for await (const msg of sdk.session.messages(input.sessionId)) {
-          yield msg;
+        const streams = input.servers.map((url) =>
+          sdk.withBaseUrl(url).global.event(),
+        );
+        for await (const event of mergeAsyncIterables(streams)) {
+          yield event;
         }
       }),
   },
 
   // Server discovery
-  servers: {
-    discover: o({ concurrency: 5, timeout: "2s" })
-      .input(z.object({ ports: z.array(z.number()) }))
-      .handler(async ({ input }) => {
-        const results = await Promise.all(
-          input.ports.map(async (port) => {
-            try {
-              const res = await fetch(`http://localhost:${port}/health`);
-              return res.ok ? { port, url: `http://localhost:${port}` } : null;
-            } catch {
-              return null;
-            }
-          }),
-        );
-        return results.filter(Boolean);
-      }),
-  },
-});
-
-export type AppRouter = typeof appRouter;
-```
-
-### Framework Adapters
-
-#### Next.js API Route
-
-```typescript
-// apps/web/src/app/api/[...opencode]/route.ts
-import { createNextHandler } from "@opencode/router/next";
-import { appRouter } from "@/server/router";
-
-const handler = createNextHandler({
-  router: appRouter,
-  createContext: async (req) => ({
-    sdk: createOpencodeClient({ baseUrl: getBaseUrl(req) }),
-  }),
-});
-
-export { handler as GET, handler as POST };
-```
-
-#### Server Actions
-
-```typescript
-// apps/web/src/server/actions.ts
-"use server";
-
-import { createAction } from "@opencode/router/next";
-import { appRouter } from "./router";
-
-export const getSession = createAction(appRouter.session.get);
-export const listSessions = createAction(appRouter.session.list);
-export const subscribeToEvents = createAction(appRouter.subscribe.events);
-```
-
-#### Direct Call (Server Components)
-
-```typescript
-// apps/web/src/app/session/[id]/page.tsx
-import { createCaller } from "@opencode/router";
-import { appRouter } from "@/server/router";
-
-export default async function SessionPage({ params }: { params: { id: string } }) {
-  const caller = createCaller(appRouter, {
-    sdk: createOpencodeClient({ baseUrl: process.env.OPENCODE_URL }),
-  });
-
-  const session = await caller.session.get({ id: params.id });
-
-  return <SessionView session={session} />;
-}
-```
-
----
-
-## Streaming Architecture
-
-### The Key Insight
-
-Streaming routes use **async generators**. The router runtime converts these to the appropriate streaming primitive:
-
-```typescript
-// User writes an async generator
-const subscribe = o({ stream: true, retry: "exponential" }).handler(
-  async function* ({ sdk }) {
-    for await (const event of sdk.global.event()) {
-      yield event;
-    }
-  },
-);
-
-// Router runtime converts to Effect.Stream internally
-// Effect.Stream.fromAsyncIterable(generator)
-//   .pipe(Stream.retry(Schedule.exponential("1s")))
-//   .pipe(Stream.timeout("30s"))
-
-// Framework adapter converts to appropriate response
-// Next.js: ReadableStream → Response
-// Server Action: AsyncIterable
-// Direct: AsyncGenerator
-```
-
-### Streaming with Retry
-
-```typescript
-// Route definition
-const subscribeWithRetry = o({
-  stream: true,
-  retry: {
-    type: "exponential",
-    maxRetries: 10,
-    retryIf: (err) => err instanceof ConnectionError,
-  },
-}).handler(async function* ({ sdk, signal }) {
-  for await (const event of sdk.global.event()) {
-    if (signal.aborted) return;
-    yield event;
-  }
-});
-
-// Internal Effect implementation
-const executeStream = (route: StreamRoute, ctx: Context) =>
-  Effect.gen(function* () {
-    const generator = route.handler(ctx);
-
-    return Stream.fromAsyncIterable(
-      generator,
-      (e) => new StreamError({ cause: e }),
-    ).pipe(
-      Stream.retry(
-        Schedule.exponential("1 second").pipe(
-          Schedule.upTo("30 seconds"),
-          Schedule.whileInput((err) => route.config.retry.retryIf(err)),
-        ),
-      ),
-      Stream.interruptWhen(Effect.fromPromise(() => ctx.signal.aborted)),
-    );
-  });
-```
-
-### Client Consumption
-
-```typescript
-// React hook for streaming routes
-function useSubscription<T>(
-  action: () => AsyncIterable<T>,
-  deps: unknown[]
-) {
-  const [events, setEvents] = useState<T[]>([]);
-  const [status, setStatus] = useState<"idle" | "connected" | "error">("idle");
-
-  useEffect(() => {
-    const controller = new AbortController();
-
-    async function subscribe() {
-      setStatus("connected");
-      try {
-        for await (const event of action()) {
-          if (controller.signal.aborted) break;
-          setEvents((prev) => [...prev, event]);
-        }
-      } catch (err) {
-        setStatus("error");
-      }
-    }
-
-    subscribe();
-    return () => controller.abort();
-  }, deps);
-
-  return { events, status };
-}
-
-// Usage
-function SessionMessages({ sessionId }: { sessionId: string }) {
-  const { events, status } = useSubscription(
-    () => subscribeToMessages({ sessionId }),
-    [sessionId]
-  );
-
-  return (
-    <div>
-      {status === "connected" && <span>Live</span>}
-      {events.map((msg) => <Message key={msg.id} {...msg} />)}
-    </div>
-  );
-}
-```
-
----
-
-## Effect Internals
-
-### Route Executor
-
-```typescript
-// packages/router/src/executor.ts
-import * as Effect from "effect/Effect";
-import * as Stream from "effect/Stream";
-import * as Schedule from "effect/Schedule";
-import * as Schema from "effect/Schema";
-
-export const executeRoute = <TInput, TOutput>(
-  route: Route<TInput, TOutput>,
-  input: TInput,
-  ctx: RouteContext,
-): Effect.Effect<TOutput, RouteError, RouterEnv> =>
-  Effect.gen(function* () {
-    // 1. Validate input
-    const validatedInput = yield* validateInput(route.inputSchema, input);
-
-    // 2. Run middleware chain
-    const middlewareCtx = yield* runMiddleware(route.middleware, ctx);
-
-    // 3. Execute handler with config
-    const handlerCtx = { ...ctx, ...middlewareCtx, input: validatedInput };
-
-    if (route.config.stream) {
-      return yield* executeStreamHandler(route, handlerCtx);
-    } else {
-      return yield* executeRequestHandler(route, handlerCtx);
-    }
-  });
-
-const executeRequestHandler = <TInput, TOutput>(
-  route: Route<TInput, TOutput>,
-  ctx: HandlerContext<TInput>,
-): Effect.Effect<TOutput, RouteError, RouterEnv> => {
-  let effect = Effect.tryPromise({
-    try: () => route.handler(ctx),
-    catch: (e) => new HandlerError({ cause: e }),
-  });
-
-  // Apply timeout
-  if (route.config.timeout) {
-    effect = effect.pipe(
-      Effect.timeout(parseDuration(route.config.timeout)),
-      Effect.catchTag("TimeoutException", () =>
-        Effect.fail(new TimeoutError({ duration: route.config.timeout })),
-      ),
-    );
-  }
-
-  // Apply retry
-  if (route.config.retry && route.config.retry !== "none") {
-    effect = effect.pipe(Effect.retry(buildSchedule(route.config.retry)));
-  }
-
-  return effect;
-};
-
-const executeStreamHandler = <TInput, TOutput>(
-  route: Route<TInput, TOutput>,
-  ctx: HandlerContext<TInput>,
-): Effect.Effect<Stream.Stream<TOutput, RouteError>, RouteError, RouterEnv> =>
-  Effect.gen(function* () {
-    const generator = route.handler(ctx) as AsyncGenerator<TOutput>;
-
-    let stream = Stream.fromAsyncIterable(
-      generator,
-      (e) => new StreamError({ cause: e }),
-    );
-
-    // Apply retry to stream
-    if (route.config.retry && route.config.retry !== "none") {
-      stream = stream.pipe(Stream.retry(buildSchedule(route.config.retry)));
-    }
-
-    return stream;
-  });
-
-const buildSchedule = (
-  retry: RetryConfig,
-): Schedule.Schedule<unknown, unknown> => {
-  if (retry === "exponential") {
-    return Schedule.exponential("1 second").pipe(Schedule.upTo("30 seconds"));
-  }
-  if (retry === "linear") {
-    return Schedule.spaced("1 second").pipe(Schedule.upTo("30 seconds"));
-  }
-
-  const base =
-    retry.type === "exponential"
-      ? Schedule.exponential("1 second")
-      : Schedule.spaced("1 second");
-
-  let schedule = base;
-
-  if (retry.maxRetries) {
-    schedule = schedule.pipe(Schedule.upTo(retry.maxRetries));
-  }
-  if (retry.maxDuration) {
-    schedule = schedule.pipe(Schedule.upTo(parseDuration(retry.maxDuration)));
-  }
-  if (retry.retryIf) {
-    schedule = schedule.pipe(Schedule.whileInput(retry.retryIf));
-  }
-
-  return schedule;
-};
-```
-
-### Typed Errors
-
-```typescript
-// packages/router/src/errors.ts
-import { Data } from "effect";
-
-export class RouteError extends Data.TaggedError("RouteError")<{
-  route: string;
-  cause: unknown;
-}> {}
-
-export class ValidationError extends Data.TaggedError("ValidationError")<{
-  route: string;
-  issues: z.ZodIssue[];
-}> {}
-
-export class TimeoutError extends Data.TaggedError("TimeoutError")<{
-  route: string;
-  duration: string;
-}> {}
-
-export class HandlerError extends Data.TaggedError("HandlerError")<{
-  route: string;
-  cause: unknown;
-}> {}
-
-export class StreamError extends Data.TaggedError("StreamError")<{
-  route: string;
-  cause: unknown;
-}> {}
-
-// Error handling in routes
-const getSession = o({ timeout: "30s" })
-  .input(z.object({ id: z.string() }))
-  .handler(async ({ input, sdk }) => {
-    const session = await sdk.session.get(input.id);
-    if (!session) {
-      throw new NotFoundError({ entity: "Session", id: input.id });
-    }
-    return session;
-  })
-  .onError((err) => {
-    // Custom error handling
-    if (err instanceof NotFoundError) {
-      return { status: 404, body: { error: "Session not found" } };
-    }
-    throw err; // Re-throw for default handling
-  });
-```
-
-### Runtime and Context
-
-```typescript
-// packages/router/src/runtime.ts
-import { ManagedRuntime, Layer, Context } from "effect";
-
-// Router environment
-export class RouterEnv extends Context.Tag("RouterEnv")<
-  RouterEnv,
-  {
-    sdk: OpencodeClient;
-    request?: Request;
-    signal: AbortSignal;
-  }
->() {}
-
-// Create runtime once, reuse across requests
-export const createRouterRuntime = (config: RouterConfig) => {
-  const layer = Layer.succeed(RouterEnv, {
-    sdk: config.sdk,
-    signal: new AbortController().signal,
-  });
-
-  return ManagedRuntime.make(layer);
-};
-
-// Framework adapter uses runtime
-export const createNextHandler = (opts: { router: Router }) => {
-  const runtime = createRouterRuntime(opts);
-
-  return async (req: Request) => {
-    const path = getRoutePath(req);
-    const route = opts.router.resolve(path);
-    const input = await parseInput(req);
-
-    const result = await runtime.runPromise(
-      executeRoute(route, input, { request: req }),
-    );
-
-    if (route.config.stream) {
-      return new Response(streamToReadable(result), {
-        headers: { "Content-Type": "text/event-stream" },
-      });
-    }
-
-    return Response.json(result);
-  };
-};
-```
-
----
-
-## Migration Strategy
-
-### Phase 1: Router Foundation (Week 1-2)
-
-**Goal:** Build the router package with core functionality
-
-```
-packages/router/
-├── src/
-│   ├── builder.ts      # createOpencodeRoute(), fluent API
-│   ├── router.ts       # createRouter(), route resolution
-│   ├── executor.ts     # Effect-based execution engine
-│   ├── errors.ts       # Typed error classes
-│   ├── runtime.ts      # ManagedRuntime setup
-│   ├── adapters/
-│   │   ├── next.ts     # createNextHandler(), createAction()
-│   │   └── direct.ts   # createCaller()
-│   └── index.ts        # Public exports
-├── package.json
-└── tsconfig.json
-```
-
-**Deliverables:**
-
-- [ ] `createOpencodeRoute()` builder with full type inference
-- [ ] Route config: `timeout`, `retry`, `concurrency`
-- [ ] Request-response execution with Effect
-- [ ] Next.js adapter (API routes)
-- [ ] Direct caller for Server Components
-- [ ] 100% test coverage on executor
-
-**Dependencies:**
-
-```json
-{
-  "dependencies": {
-    "effect": "3.17.7",
-    "@effect/platform": "0.90.3",
-    "@effect/schema": "0.90.3"
-  },
-  "peerDependencies": {
-    "zod": "^3.22.0"
-  }
-}
-```
-
-### Phase 2: Streaming Support (Week 3-4)
-
-**Goal:** Add streaming routes with retry/reconnection
-
-**Deliverables:**
-
-- [ ] `stream: true` config option
-- [ ] Async generator handler support
-- [ ] Stream retry with Effect.Stream
-- [ ] SSE response encoding
-- [ ] `useSubscription` React hook
-- [ ] Streaming tests with mock generators
-
-**Key Implementation:**
-
-```typescript
-// Streaming route
-const subscribe = o({ stream: true, retry: "exponential" }).handler(
-  async function* ({ sdk }) {
-    for await (const event of sdk.global.event()) {
-      yield event;
-    }
-  },
-);
-
-// Internal: Convert to Effect.Stream with retry
-Stream.fromAsyncIterable(generator)
-  .pipe(Stream.retry(Schedule.exponential("1s")))
-  .pipe(Stream.mapEffect((event) => Effect.succeed(event)));
-```
-
-### Phase 3: Server Discovery Migration (Week 5)
-
-**Goal:** Migrate first real route to prove the pattern
-
-**Current Code:** `apps/web/src/app/api/opencode-servers/route.ts` (150+ lines)
-
-**New Code:**
-
-```typescript
-// apps/web/src/server/router.ts
-export const appRouter = createRouter({
   servers: {
     discover: o({ concurrency: 5, timeout: "2s" })
       .input(
@@ -791,10 +701,12 @@ export const appRouter = createRouter({
         const results = await Promise.all(
           input.ports.map(async (port) => {
             try {
-              const res = await fetch(`http://localhost:${port}/health`);
+              const res = await fetch(
+                `http://127.0.0.1:${port}/project/current`,
+              );
               if (!res.ok) return null;
               const data = await res.json();
-              return { port, url: `http://localhost:${port}`, ...data };
+              return { port, url: `http://127.0.0.1:${port}`, ...data };
             } catch {
               return null;
             }
@@ -803,418 +715,210 @@ export const appRouter = createRouter({
         return results.filter(Boolean);
       }),
   },
-});
 
-// apps/web/src/app/api/opencode-servers/route.ts
-import { createNextHandler } from "@opencode/router/next";
-import { appRouter } from "@/server/router";
-
-export const GET = createNextHandler({
-  router: appRouter,
-  endpoint: "servers.discover",
-});
-```
-
-**Expected Reduction:** 150 lines → 30 lines (80% reduction)
-
-### Phase 4: SSE Migration (Week 6-8)
-
-**Goal:** Migrate SSE handling to streaming routes
-
-**Current Code:**
-
-- `apps/web/src/react/use-sse.tsx` (342 lines)
-- `apps/web/src/react/use-multi-server-sse.ts` (454 lines)
-
-**New Code:**
-
-```typescript
-// Server: Streaming route
-export const appRouter = createRouter({
-  subscribe: {
-    events: o({ stream: true, retry: "exponential" })
-      .input(z.object({ directory: z.string() }))
-      .handler(async function* ({ input, sdk }) {
-        for await (const event of sdk.global.event()) {
-          if (event.directory === input.directory) {
-            yield event;
-          }
-        }
-      }),
-
-    multiServer: o({ stream: true, retry: "exponential" })
-      .input(z.object({ servers: z.array(z.string()) }))
-      .handler(async function* ({ input, sdk }) {
-        // Merge streams from multiple servers
-        const streams = input.servers.map((url) =>
-          sdk.withBaseUrl(url).global.event(),
-        );
-
-        for await (const event of mergeAsyncIterables(streams)) {
-          yield event;
-        }
-      }),
-  },
-});
-
-// Client: Simple hook
-function useEvents(directory: string) {
-  return useSubscription(() => subscribeToEvents({ directory }), [directory]);
-}
-
-function useMultiServerEvents(servers: string[]) {
-  return useSubscription(
-    () => subscribeToMultiServer({ servers }),
-    [servers.join(",")],
-  );
-}
-```
-
-**Expected Reduction:** 796 lines → 100 lines (87% reduction)
-
-### Phase 5: Message Queue Migration (Week 9-10)
-
-**Goal:** Migrate message processing to router
-
-**Current Code:** `apps/web/src/app/session/[id]/session-messages.tsx` (208 lines)
-
-**New Code:**
-
-```typescript
-export const appRouter = createRouter({
+  // Messages
   messages: {
-    stream: o({ stream: true, retry: "exponential" })
-      .input(z.object({ sessionId: z.string() }))
-      .handler(async function* ({ input, sdk }) {
-        for await (const msg of sdk.session.messages(input.sessionId)) {
-          yield msg;
-        }
-      }),
-
     send: o({ timeout: "30s" })
       .input(
         z.object({
           sessionId: z.string(),
           content: z.string(),
+          model: z.string().optional(),
         }),
       )
       .handler(async ({ input, sdk }) => {
-        return sdk.session.sendMessage(input.sessionId, input.content);
+        return sdk.session.promptAsync({
+          path: { id: input.sessionId },
+          body: {
+            parts: [{ type: "text", text: input.content }],
+            model: input.model,
+          },
+        });
+      }),
+  },
+
+  // Providers
+  providers: {
+    list: o({ timeout: "30s", cache: { ttl: "30s" } }).handler(
+      async ({ sdk }) => sdk.provider.list(),
+    ),
+  },
+
+  // Files
+  files: {
+    search: o({ timeout: "5s" })
+      .input(z.object({ query: z.string(), dirs: z.boolean().default(true) }))
+      .handler(async ({ input, sdk }) => {
+        return sdk.find.files({
+          query: { query: input.query, dirs: String(input.dirs) },
+        });
       }),
   },
 });
-```
 
-**Expected Reduction:** 208 lines → 40 lines (81% reduction)
-
-### Phase 6: Full Rollout (Week 11-12)
-
-**Goal:** Migrate remaining routes, remove legacy code
-
-- [ ] Migrate all API routes to router
-- [ ] Migrate all Server Actions to router
-- [ ] Remove legacy async utilities
-- [ ] Update documentation
-- [ ] Performance benchmarks
-
----
-
-## Success Metrics
-
-### Quantitative
-
-| Metric                    | Baseline | Target | Measurement                     |
-| ------------------------- | -------- | ------ | ------------------------------- |
-| **Total Async Lines**     | 2000+    | 400    | Line count in router + handlers |
-| **Code Reduction**        | 0%       | 80%    | (Baseline - Target) / Baseline  |
-| **Route Definitions**     | 0        | 20+    | Count of routes in appRouter    |
-| **Effect Imports (app/)** | 0        | 0      | No Effect in application code   |
-| **Type Errors**           | N/A      | 0      | Full type inference working     |
-
-### Qualitative
-
-- [ ] **Zero Effect Knowledge Required** - New devs productive without Effect training
-- [ ] **Declarative Config** - All retry/timeout/concurrency in route config
-- [ ] **Streaming Just Works** - SSE with automatic reconnection
-- [ ] **Type Safety** - Input → Handler → Output fully inferred
-- [ ] **Testable** - Mock handlers, not Effect internals
-
----
-
-## Package Structure
-
-```
-packages/
-├── router/                    # @opencode/router
-│   ├── src/
-│   │   ├── builder.ts         # Route builder API
-│   │   ├── router.ts          # Router creation
-│   │   ├── executor.ts        # Effect execution engine
-│   │   ├── stream.ts          # Streaming support
-│   │   ├── errors.ts          # Typed errors
-│   │   ├── runtime.ts         # ManagedRuntime
-│   │   ├── adapters/
-│   │   │   ├── next.ts        # Next.js integration
-│   │   │   └── direct.ts      # Direct caller
-│   │   └── index.ts
-│   ├── effect.ts              # @opencode/router/effect (escape hatch)
-│   └── package.json
-│
-└── router-react/              # @opencode/router-react
-    ├── src/
-    │   ├── use-subscription.ts
-    │   ├── use-query.ts
-    │   └── index.ts
-    └── package.json
+export type AppRouter = typeof appRouter;
 ```
 
 ---
 
-## Type Inference
+## Migration Targets
 
-### Full Chain Inference
+After router is built, migrate in this order:
+
+| Priority | File                            | Current Lines | After | Reduction |
+| -------- | ------------------------------- | ------------- | ----- | --------- |
+| 1        | `api/opencode-servers/route.ts` | 150+          | 15    | 90%       |
+| 2        | `use-sse.tsx`                   | 342           | 30    | 91%       |
+| 3        | `multi-server-sse.ts`           | 454           | 50    | 89%       |
+| 4        | `use-send-message.ts`           | 208           | 40    | 81%       |
+| 5        | `use-create-session.ts`         | 116           | 10    | 91%       |
+| 6        | `use-file-search.ts`            | 115           | 15    | 87%       |
+| 7        | `use-providers.ts`              | 94            | 10    | 89%       |
+
+**Total: 1479 lines → ~170 lines (88% reduction)**
+
+---
+
+## Dependencies
+
+```json
+{
+  "name": "@opencode/router",
+  "dependencies": {
+    "effect": "^3.12.0"
+  },
+  "peerDependencies": {
+    "zod": "^3.22.0",
+    "next": ">=15.0.0"
+  }
+}
+```
+
+Note: Using Effect 3.12+ (Schema is now in core `effect` package, not separate `@effect/schema`).
+
+---
+
+## Testing Strategy
 
 ```typescript
-// Route definition
-const getSession = o({ timeout: "30s" })
-  .input(z.object({ id: z.string() }))
-  .handler(async ({ input, sdk }) => {
-    //              ^? { id: string }
-    const session = await sdk.session.get(input.id);
-    return session;
-    //     ^? Session
+// Test routes by mocking handlers, not Effect internals
+import { createTestCaller } from "@opencode/router/test";
+
+describe("session.get", () => {
+  it("returns session by id", async () => {
+    const mockSdk = {
+      session: {
+        get: vi.fn().mockResolvedValue({ id: "123", title: "Test" }),
+      },
+    };
+
+    const caller = createTestCaller(appRouter, { sdk: mockSdk });
+    const result = await caller.session.get({ id: "123" });
+
+    expect(result).toEqual({ id: "123", title: "Test" });
+    expect(mockSdk.session.get).toHaveBeenCalledWith("123");
   });
 
-// Router
-const router = createRouter({
-  session: { get: getSession },
-});
+  it("times out after 30s", async () => {
+    const mockSdk = {
+      session: {
+        get: vi.fn().mockImplementation(() => new Promise(() => {})), // Never resolves
+      },
+    };
 
-// Caller - fully typed
-const caller = createCaller(router, ctx);
-const session = await caller.session.get({ id: "123" });
-//    ^? Session
+    const caller = createTestCaller(appRouter, { sdk: mockSdk });
 
-// Server Action - fully typed
-const action = createAction(router.session.get);
-const session = await action({ id: "123" });
-//    ^? Session
-
-// Error on wrong input
-await caller.session.get({ wrong: "field" });
-//                        ^^^^^^^^^^^^^^^^ Type error!
-```
-
-### Streaming Type Inference
-
-```typescript
-// Streaming route
-const subscribe = o({ stream: true }).handler(async function* ({ sdk }) {
-  for await (const event of sdk.global.event()) {
-    yield event;
-    //    ^? SSEEvent
-  }
-});
-
-// Client receives AsyncIterable
-const action = createAction(router.subscribe.events);
-for await (const event of action({ directory: "/" })) {
-  //             ^? SSEEvent
-  console.log(event);
-}
-```
-
----
-
-## Comparison: Before and After
-
-### Server Discovery
-
-**Before (150+ lines):**
-
-```typescript
-// Manual timeout, concurrency, error handling
-export async function GET() {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2000);
-
-  const ports = [3000, 3001, 3002, 4096];
-  const results = [];
-
-  // Manual concurrency limiting
-  const BATCH_SIZE = 5;
-  for (let i = 0; i < ports.length; i += BATCH_SIZE) {
-    const batch = ports.slice(i, i + BATCH_SIZE);
-    const batchResults = await Promise.all(
-      batch.map(async (port) => {
-        try {
-          const res = await fetch(`http://localhost:${port}/health`, {
-            signal: controller.signal,
-          });
-          // ... 50 more lines of error handling
-        } catch (err) {
-          // ... error handling
-        }
-      }),
+    await expect(caller.session.get({ id: "123" })).rejects.toThrow(
+      TimeoutError,
     );
-    results.push(...batchResults);
-  }
-
-  clearTimeout(timeout);
-  return Response.json(results.filter(Boolean));
-}
-```
-
-**After (15 lines):**
-
-```typescript
-// Declarative config, Effect handles the rest
-export const appRouter = createRouter({
-  servers: {
-    discover: o({ concurrency: 5, timeout: "2s" })
-      .input(z.object({ ports: z.array(z.number()) }))
-      .handler(async ({ input }) => {
-        return Promise.all(input.ports.map(checkPort));
-      }),
-  },
+  });
 });
 
-export const GET = createNextHandler({
-  router: appRouter,
-  endpoint: "servers.discover",
-});
-```
-
-### SSE Subscription
-
-**Before (796 lines across 2 files):**
-
-```typescript
-// Manual reconnection, heartbeat, multi-server coordination
-export function useSSE(baseUrl: string) {
-  const [connected, setConnected] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-  const retryCount = useRef(0);
-  const maxRetries = 5;
-
-  useEffect(() => {
-    let eventSource: EventSource | null = null;
-    let heartbeatInterval: NodeJS.Timeout;
-    let reconnectTimeout: NodeJS.Timeout;
-
-    const connect = () => {
-      eventSource = new EventSource(`${baseUrl}/events`);
-
-      eventSource.onopen = () => {
-        setConnected(true);
-        retryCount.current = 0;
-
-        // Heartbeat
-        heartbeatInterval = setInterval(() => {
-          // ... 30 lines of heartbeat logic
-        }, 30000);
-      };
-
-      eventSource.onerror = () => {
-        setConnected(false);
-        eventSource?.close();
-
-        // Exponential backoff
-        if (retryCount.current < maxRetries) {
-          const delay = Math.min(1000 * 2 ** retryCount.current, 30000);
-          reconnectTimeout = setTimeout(connect, delay);
-          retryCount.current++;
-        } else {
-          setError(new Error("Max retries exceeded"));
-        }
-      };
-
-      // ... 200 more lines
+describe("subscribe.events", () => {
+  it("yields events from generator", async () => {
+    const events = [{ type: "message" }, { type: "status" }];
+    const mockSdk = {
+      global: {
+        event: async function* () {
+          for (const e of events) yield { directory: "/test", payload: e };
+        },
+      },
     };
 
-    connect();
+    const caller = createTestCaller(appRouter, { sdk: mockSdk });
+    const stream = await caller.subscribe.events({ directory: "/test" });
 
-    return () => {
-      eventSource?.close();
-      clearInterval(heartbeatInterval);
-      clearTimeout(reconnectTimeout);
+    const received = [];
+    for await (const event of stream) {
+      received.push(event);
+    }
+
+    expect(received).toHaveLength(2);
+  });
+
+  it("retries on connection error", async () => {
+    let attempts = 0;
+    const mockSdk = {
+      global: {
+        event: async function* () {
+          attempts++;
+          if (attempts < 3) throw new Error("Connection failed");
+          yield { directory: "/test", payload: { type: "success" } };
+        },
+      },
     };
-  }, [baseUrl]);
 
-  // ... 300 more lines for multi-server coordination
-}
-```
+    const caller = createTestCaller(appRouter, { sdk: mockSdk });
+    const stream = await caller.subscribe.events({ directory: "/test" });
 
-**After (30 lines):**
+    const received = [];
+    for await (const event of stream) {
+      received.push(event);
+      break; // Just get first event
+    }
 
-```typescript
-// Server: Streaming route with retry
-export const appRouter = createRouter({
-  subscribe: {
-    events: o({ stream: true, retry: "exponential" })
-      .input(z.object({ directory: z.string() }))
-      .handler(async function* ({ sdk }) {
-        for await (const event of sdk.global.event()) {
-          yield event;
-        }
-      }),
-  },
+    expect(attempts).toBe(3);
+    expect(received[0].payload.type).toBe("success");
+  });
 });
-
-// Client: Simple hook
-function useEvents(directory: string) {
-  const { data, status } = useSubscription(
-    () => subscribeToEvents({ directory }),
-    [directory],
-  );
-  return { events: data, connected: status === "connected" };
-}
 ```
 
 ---
 
-## Risks and Mitigations
+## Escape Hatch
 
-| Risk                                | Probability | Impact | Mitigation                                 |
-| ----------------------------------- | ----------- | ------ | ------------------------------------------ |
-| **Router abstraction too limiting** | Medium      | High   | Escape hatch via `@opencode/router/effect` |
-| **Streaming complexity**            | Medium      | Medium | Extensive testing, fallback to polling     |
-| **Type inference breaks**           | Low         | High   | Comprehensive type tests, TS 5.4+ required |
-| **Effect version conflicts**        | Low         | Medium | Pin versions, test upgrades in isolation   |
-| **Performance overhead**            | Low         | Low    | Benchmark vs raw fetch, optimize hot paths |
+For cases where the router abstraction is too limiting:
 
----
+```typescript
+// @opencode/router/effect
+import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
+import { RouterEnv } from "@opencode/router";
 
-## Questions Resolved
+// Direct Effect access for power users
+export const customRoute = o({ timeout: "30s" }).handler(async ({ sdk }) => {
+  // Can use Effect directly if needed
+  const effect = Effect.gen(function* () {
+    const result = yield* Effect.tryPromise(() => sdk.session.list());
+    // Custom Effect logic here
+    return result;
+  });
 
-1. **How does SSE work with Server Actions?**
-   - Server Actions return `AsyncIterable`, client consumes with `for await`
-   - Router converts async generator → Effect.Stream → AsyncIterable
-
-2. **How do we enforce no Effect in app code?**
-   - Effect only imported in `packages/router/src/`
-   - ESLint rule: no `effect` imports outside router package
-
-3. **What about complex retry logic?**
-   - Route config supports full retry options: `{ type, maxRetries, maxDuration, retryIf }`
-   - Maps to Effect.Schedule internally
-
-4. **How do we test routes?**
-   - Mock the handler, not Effect internals
-   - `createTestCaller(router, { sdk: mockSdk })`
+  return Effect.runPromise(effect);
+});
+```
 
 ---
 
 ## References
 
-### UploadThing Implementation
+### UploadThing (Pattern Source)
 
 | File                                                                                                                           | Pattern          | Lines                  |
 | ------------------------------------------------------------------------------------------------------------------------------ | ---------------- | ---------------------- |
 | [`upload-builder.ts`](https://github.com/pingdotgg/uploadthing/blob/main/packages/uploadthing/src/_internal/upload-builder.ts) | Fluent builder   | 101-123                |
 | [`handler.ts`](https://github.com/pingdotgg/uploadthing/blob/main/packages/uploadthing/src/_internal/handler.ts)               | Effect execution | 50-52, 66-101, 103-150 |
 | [`effect-platform.ts`](https://github.com/pingdotgg/uploadthing/blob/main/packages/uploadthing/src/effect-platform.ts)         | Effect export    | 32-70                  |
-| [`types.ts`](https://github.com/pingdotgg/uploadthing/blob/main/packages/uploadthing/src/types.ts)                             | Type inference   | 31, 33-40              |
 
 ### Effect Documentation
 
@@ -1223,20 +927,11 @@ function useEvents(directory: string) {
 - [Effect.Schedule](https://effect.website/docs/guides/scheduling/schedule)
 - [ManagedRuntime](https://effect.website/docs/guides/runtime)
 
-### Migration Targets
+### Current Codebase
 
-| File                                                 | Lines | Phase |
-| ---------------------------------------------------- | ----- | ----- |
-| `apps/web/src/app/api/opencode-servers/route.ts`     | 150+  | 3     |
-| `apps/web/src/react/use-sse.tsx`                     | 342   | 4     |
-| `apps/web/src/react/use-multi-server-sse.ts`         | 454   | 4     |
-| `apps/web/src/app/session/[id]/session-messages.tsx` | 208   | 5     |
-
----
-
-## Changelog
-
-| Date       | Author              | Change                                 |
-| ---------- | ------------------- | -------------------------------------- |
-| 2025-12-28 | QuickMountain Agent | Initial proposal                       |
-| 2025-12-29 | Claude              | Rewrite with router-first architecture |
+| File                                             | Lines | Key Patterns                                   |
+| ------------------------------------------------ | ----- | ---------------------------------------------- |
+| `apps/web/src/app/api/opencode-servers/route.ts` | 150+  | Timeout, concurrency, parallel fetch           |
+| `apps/web/src/react/use-sse.tsx`                 | 342   | Exponential backoff, heartbeat, visibility API |
+| `apps/web/src/core/multi-server-sse.ts`          | 454   | Polling, per-server SSE, stream merge          |
+| `apps/web/src/react/use-send-message.ts`         | 208   | FIFO queue, session gating                     |
