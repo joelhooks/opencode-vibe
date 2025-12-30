@@ -107,6 +107,9 @@ export function useMessages(options: UseMessagesOptions): UseMessagesReturn {
 	// Subscribe to SSE events for real-time updates
 	useEffect(() => {
 		const unsubscribe = multiServerSSE.onEvent((event) => {
+			// Skip SSE updates while fetch is in progress to avoid race conditions
+			if (fetchInProgressRef.current) return
+
 			const { type, properties } = event.payload
 
 			// Handle message.updated events (server uses this for both create and update)

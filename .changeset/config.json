@@ -1,6 +1,6 @@
 {
 	"$schema": "https://unpkg.com/@changesets/config@3.1.2/schema.json",
-	"changelog": ["@changesets/changelog-github", { "repo": "joelhooks/opencode-next" }],
+	"changelog": ["@changesets/changelog-github", { "repo": "joelhooks/opencode-vibe" }],
 	"commit": false,
 	"fixed": [],
 	"linked": [],

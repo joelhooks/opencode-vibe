@@ -34,6 +34,8 @@ export interface UsePartsOptions {
 	sessionId: string
 	/** Project directory (optional) */
 	directory?: string
+	/** Initial data from server (hydration) - skips initial fetch if provided */
+	initialData?: Part[]
 }
 
 export interface UsePartsReturn {
