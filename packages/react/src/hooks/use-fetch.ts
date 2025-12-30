@@ -134,6 +134,7 @@ export function useFetch<T, P = void>(
 	}, [enabled])
 
 	// Fetch on mount and when enabled/params change
+	// biome-ignore lint/correctness/useExhaustiveDependencies: paramsKey intentionally triggers refetch when params change
 	useEffect(() => {
 		doFetch()
 	}, [doFetch, paramsKey])
