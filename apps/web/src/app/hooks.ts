@@ -8,4 +8,14 @@
  */
 import { generateOpencodeHelpers } from "@opencode-vibe/react"
 
-export const { useSession, useMessages, useSendMessage } = generateOpencodeHelpers()
+export const {
+	useSession,
+	useMessages,
+	useSendMessage,
+	useSessionList,
+	useProviders,
+	useProjects,
+	useCommands,
+	useCreateSession,
+	useFileSearch,
+} = generateOpencodeHelpers()

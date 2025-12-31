@@ -1,9 +1,9 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useMessages } from "@/app/hooks"
 import {
 	useOpencode,
-	useMessages,
 	useMessagesWithParts,
 	useParts,
 	type OpencodeMessage,
