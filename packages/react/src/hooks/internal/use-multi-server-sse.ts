@@ -27,7 +27,7 @@
 
 import { useEffect } from "react"
 import { multiServerSSE } from "@opencode-vibe/core/sse"
-import type { GlobalEvent } from "../types/events"
+import type { GlobalEvent } from "../../types/events"
 
 export interface UseMultiServerSSEOptions {
 	/** Callback invoked when any server emits an event */

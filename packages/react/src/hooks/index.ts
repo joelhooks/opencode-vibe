@@ -2,16 +2,11 @@
  * React hooks for OpenCode
  */
 
-// === Data Fetching ===
+// === Public API (Stable) ===
+
+// Data Fetching
 export { useSessionList } from "./use-session-list"
 export { useSession } from "./use-session"
-export { useSessionStatus } from "./use-session-status"
-export { useMessages } from "./use-messages"
-export { useParts } from "./use-parts"
-export {
-	useMessagesWithParts,
-	type OpencodeMessage,
-} from "./use-messages-with-parts"
 export {
 	useProjects,
 	useCurrentProject,
@@ -28,43 +23,49 @@ export {
 } from "./use-servers"
 export { useProviders } from "./use-providers"
 
-// === Real-time (SSE) ===
+// Actions
+export { useSendMessage } from "./use-send-message"
+export { useCreateSession } from "./use-create-session"
+export { useCommands, type UseCommandsOptions } from "./use-commands"
+
+// Utilities
+export { useFileSearch } from "./use-file-search"
+
+// === Internal Hooks (Re-exported for backward compatibility) ===
+// @internal - These are not part of the public API and may change without notice.
+// Prefer using higher-level hooks like useSession instead.
+
+export { useSessionStatus } from "./internal/use-session-status"
+export { useMessages } from "./internal/use-messages"
+export { useParts } from "./internal/use-parts"
+export {
+	useMessagesWithParts,
+	type OpencodeMessage,
+} from "./internal/use-messages-with-parts"
 export {
 	useSSE,
 	type UseSSEOptions,
 	type UseSSEReturn,
-} from "./use-sse"
+} from "./internal/use-sse"
 export {
 	useMultiServerSSE,
 	type UseMultiServerSSEOptions,
-} from "./use-multi-server-sse"
-
-// === Subagents ===
+} from "./internal/use-multi-server-sse"
 export {
 	useSubagents,
 	type UseSubagentsReturn,
 	type SubagentSession,
 	type SubagentState,
-} from "./use-subagents"
+} from "./internal/use-subagents"
 export {
 	useSubagent,
 	type UseSubagentOptions,
 	type UseSubagentReturn,
-} from "./use-subagent"
+} from "./internal/use-subagent"
 export {
 	useSubagentSync,
 	type UseSubagentSyncOptions,
-} from "./use-subagent-sync"
-
-// === State Management ===
-export { useContextUsage, formatTokens } from "./use-context-usage"
-export { useCompactionState } from "./use-compaction-state"
-
-// === Actions ===
-export { useSendMessage } from "./use-send-message"
-export { useCreateSession } from "./use-create-session"
-export { useCommands, type UseCommandsOptions } from "./use-commands"
-
-// === Utilities ===
-export { useLiveTime } from "./use-live-time"
-export { useFileSearch } from "./use-file-search"
+} from "./internal/use-subagent-sync"
+export { useContextUsage, formatTokens } from "./internal/use-context-usage"
+export { useCompactionState } from "./internal/use-compaction-state"
+export { useLiveTime } from "./internal/use-live-time"

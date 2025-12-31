@@ -3,7 +3,7 @@ import type { Prompt, SlashCommand } from "../types/prompt"
 import { convertToApiParts } from "../lib/prompt-api"
 import { useCommands } from "./use-commands"
 import { sessions } from "@opencode-vibe/core/api"
-import { useSessionStatus } from "./use-session-status"
+import { useSessionStatus } from "./internal/use-session-status"
 
 /**
  * Result of parsing a prompt for slash commands

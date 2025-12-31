@@ -28,12 +28,12 @@ vi.mock("./use-commands", () => ({
 // Mock useSessionStatus hook
 // Note: The stub in use-send-message.ts expects (sessionId: string)
 // The real hook expects ({ sessionId, directory? })
-vi.mock("./use-session-status", () => ({
+vi.mock("./internal/use-session-status", () => ({
 	useSessionStatus: vi.fn(() => ({ running: false, isLoading: false })),
 }))
 
 import { sessions } from "@opencode-vibe/core/api"
-import { useSessionStatus } from "./use-session-status"
+import { useSessionStatus } from "./internal/use-session-status"
 
 describe("useSendMessage - queue behavior with stub (reproduces bug)", () => {
 	beforeEach(() => {

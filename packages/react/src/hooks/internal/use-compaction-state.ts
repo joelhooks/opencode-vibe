@@ -22,9 +22,9 @@
 
 "use client"
 
-import type { CompactionState } from "../store/types"
-import { useOpencodeStore } from "../store"
-import { useOpencode } from "../providers"
+import type { CompactionState } from "../../store/types"
+import { useOpencodeStore } from "../../store"
+import { useOpencode } from "../../providers"
 
 /**
  * Default compaction state when no compaction is active

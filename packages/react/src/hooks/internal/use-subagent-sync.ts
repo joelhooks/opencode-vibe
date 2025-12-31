@@ -13,7 +13,7 @@ import { useMultiServerSSE } from "./use-multi-server-sse.js"
 import { subagents } from "@opencode-vibe/core/api"
 import type { SubagentStateRef } from "@opencode-vibe/core/api"
 import type { Message, Part } from "@opencode-vibe/core/types"
-import type { GlobalEvent } from "../types/events.js"
+import type { GlobalEvent } from "../../types/events.js"
 
 /**
  * Options for useSubagentSync hook

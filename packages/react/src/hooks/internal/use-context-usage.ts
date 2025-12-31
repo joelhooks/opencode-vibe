@@ -20,9 +20,9 @@
 
 "use client"
 
-import type { ContextUsage } from "../store/types"
-import { useOpencodeStore } from "../store"
-import { useOpencode } from "../providers"
+import type { ContextUsage } from "../../store/types"
+import { useOpencodeStore } from "../../store"
+import { useOpencode } from "../../providers"
 
 /**
  * Default context usage state when no data exists yet

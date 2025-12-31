@@ -27,7 +27,7 @@ import { useOpencodeStore } from "../store"
 import type { GlobalEvent } from "../store/types"
 import { createClient } from "@opencode-vibe/core/client"
 import { createRouter, createCaller, createRoutes, type Caller } from "@opencode-vibe/core/router"
-import { useMultiServerSSE } from "../hooks/use-multi-server-sse"
+import { useMultiServerSSE } from "../hooks/internal/use-multi-server-sse"
 
 /**
  * Context value provided by OpenCodeProvider

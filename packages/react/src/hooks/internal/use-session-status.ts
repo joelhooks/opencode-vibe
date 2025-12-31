@@ -16,9 +16,9 @@
 
 "use client"
 
-import type { SessionStatus } from "../store/types"
-import { useOpencodeStore } from "../store"
-import { useOpencode } from "../providers"
+import type { SessionStatus } from "../../store/types"
+import { useOpencodeStore } from "../../store"
+import { useOpencode } from "../../providers"
 
 /**
  * Hook to get session status from store

@@ -6,17 +6,17 @@ export {
 	useSSE,
 	type UseSSEOptions,
 	type UseSSEReturn,
-} from "./hooks/use-sse"
+} from "./hooks/internal/use-sse"
 export {
 	useMultiServerSSE,
 	type UseMultiServerSSEOptions,
-} from "./hooks/use-multi-server-sse"
-export { useMessages } from "./hooks/use-messages"
-export { useParts } from "./hooks/use-parts"
+} from "./hooks/internal/use-multi-server-sse"
+export { useMessages } from "./hooks/internal/use-messages"
+export { useParts } from "./hooks/internal/use-parts"
 export {
 	useMessagesWithParts,
 	type OpencodeMessage,
-} from "./hooks/use-messages-with-parts"
+} from "./hooks/internal/use-messages-with-parts"
 export {
 	useProjects,
 	useCurrentProject,
@@ -35,7 +35,7 @@ export {
 } from "./providers"
 // Hooks still using caller pattern (to be migrated)
 export { useCreateSession } from "./hooks/use-create-session"
-export { useProvider } from "./hooks/use-provider"
+export { useProvider } from "./hooks/internal/use-provider"
 export {
 	useSendMessage,
 	type UseSendMessageOptions,
@@ -48,13 +48,13 @@ export {
 	type Provider,
 	type Model,
 } from "./hooks/use-providers"
-export type { ProviderData, UseProviderResult } from "./hooks/use-provider"
+export type { ProviderData, UseProviderResult } from "./hooks/internal/use-provider"
 export {
 	useFileSearch,
 	type UseFileSearchOptions,
 	type UseFileSearchResult,
 } from "./hooks/use-file-search"
-export { useLiveTime } from "./hooks/use-live-time"
+export { useLiveTime } from "./hooks/internal/use-live-time"
 export { useCommands } from "./hooks/use-commands"
 
 // Re-export core types for backwards compatibility
@@ -71,25 +71,25 @@ export {
 } from "./hooks/use-servers"
 export { useSession } from "./hooks/use-session"
 export { useSessionList } from "./hooks/use-session-list"
-export { useSessionStatus } from "./hooks/use-session-status"
+export { useSessionStatus } from "./hooks/internal/use-session-status"
 export type { SessionStatus } from "./store/types"
 export {
 	useSubagents,
 	type UseSubagentsReturn,
 	type SubagentSession,
 	type SubagentState,
-} from "./hooks/use-subagents"
+} from "./hooks/internal/use-subagents"
 export {
 	useSubagent,
 	type UseSubagentOptions,
 	type UseSubagentReturn,
-} from "./hooks/use-subagent"
-export { useContextUsage, formatTokens } from "./hooks/use-context-usage"
-export { useCompactionState } from "./hooks/use-compaction-state"
+} from "./hooks/internal/use-subagent"
+export { useContextUsage, formatTokens } from "./hooks/internal/use-context-usage"
+export { useCompactionState } from "./hooks/internal/use-compaction-state"
 export {
 	useSubagentSync,
 	type UseSubagentSyncOptions,
-} from "./hooks/use-subagent-sync"
+} from "./hooks/internal/use-subagent-sync"
 
 // Store (Phase 1: Core Store + Binary Utils)
 export {

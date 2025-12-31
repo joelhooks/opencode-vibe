@@ -21,8 +21,8 @@
 "use client"
 
 import type { Message } from "@opencode-vibe/core/types"
-import { useOpencodeStore } from "../store"
-import { useOpencode } from "../providers"
+import { useOpencodeStore } from "../../store"
+import { useOpencode } from "../../providers"
 
 const EMPTY_MESSAGES: Message[] = []
 

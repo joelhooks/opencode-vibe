@@ -30,8 +30,8 @@
 
 import { useMemo } from "react"
 import type { Message, Part } from "@opencode-vibe/core/types"
-import { useOpencodeStore } from "../store"
-import { useOpencode } from "../providers"
+import { useOpencodeStore } from "../../store"
+import { useOpencode } from "../../providers"
 
 export interface OpencodeMessage {
 	/** Message metadata */

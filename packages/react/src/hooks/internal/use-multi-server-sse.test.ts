@@ -7,7 +7,7 @@
 
 import { describe, test, expect, vi, beforeEach } from "vitest"
 import { multiServerSSE } from "@opencode-vibe/core/sse"
-import type { GlobalEvent } from "../types/events"
+import type { GlobalEvent } from "../../types/events"
 
 /**
  * Core Integration Tests - Logic Only

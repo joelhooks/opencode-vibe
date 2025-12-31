@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, test, beforeEach } from "vitest"
-import { useOpencodeStore } from "../store"
+import { useOpencodeStore } from "../../store"
 
 describe("useSessionStatus - store integration", () => {
 	beforeEach(() => {
