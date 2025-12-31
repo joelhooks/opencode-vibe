@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation"
 import { Plus, Loader2 } from "lucide-react"
-import { useCreateSession } from "@/react"
+import { useCreateSession } from "@opencode-vibe/react"
 import { Button } from "@/components/ui/button"
 
 interface NewSessionButtonProps {

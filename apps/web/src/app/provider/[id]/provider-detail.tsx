@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useProvider } from "@/react"
+import { useProvider } from "@opencode-vibe/react"
 
 /**
  * Client component for provider detail - uses SSE for real-time data
