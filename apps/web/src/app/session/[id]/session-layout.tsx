@@ -1,18 +1,10 @@
 "use client"
 
-import { useEffect, useState, createContext, useContext } from "react"
+import { useState, createContext, useContext } from "react"
 import Link from "next/link"
 import type { UIMessage } from "ai"
 import { toast } from "sonner"
-import {
-	OpencodeProvider,
-	useSession,
-	useMessages,
-	useSendMessage,
-	useOpencode,
-	useSessionStatus,
-	useSubagentSync,
-} from "@opencode-vibe/react"
+import { OpencodeProvider, useSession } from "@opencode-vibe/react"
 import { NewSessionButton } from "./new-session-button"
 import { SessionMessages } from "./session-messages"
 import { PromptInput } from "@/components/prompt"
@@ -115,49 +107,32 @@ function SessionContent({
 	const [debugPanelOpen, setDebugPanelOpen] = useState(false)
 	const toggleDebugPanel = () => setDebugPanelOpen((prev) => !prev)
 
-	const { directory: contextDirectory } = useOpencode()
-
-	// SSE events are handled by OpencodeProvider via useMultiServerSSE
-	// Subscribe to subagent SSE events for this session
-	// This enables real-time tracking of child sessions spawned via Task tool
-	useSubagentSync({ sessionId })
-
-	// Get reactive session data (store selector)
-	const fetchedSession = useSession(sessionId)
-	const session = fetchedSession ?? initialSession
-
-	// Get session running status for header indicator (store selector)
-	const status = useSessionStatus(sessionId)
-	const running = status === "running"
-
-	// Get reactive messages from store (store selector)
-	const messages = useMessages(sessionId)
-
-	// Send message hook - use contextDirectory to ensure we route to the right server
-	const { sendMessage, isLoading, error, queueLength } = useSendMessage({
+	// Use the facade hook - replaces 6 old hooks with single call
+	const { data, messages, running, isLoading, error, sendMessage, queueLength } = useSession(
 		sessionId,
-		directory: contextDirectory,
-	})
+		{
+			directory,
+			onError: (err) => {
+				toast.error("Failed to send message", {
+					description: err.message || "An unknown error occurred",
+					duration: 5000,
+				})
+			},
+		},
+	)
+
+	// Fallback to initialSession for SSR hydration
+	const session = data ?? initialSession
 
 	// Handle prompt submission
 	const handleSubmit = async (parts: Prompt) => {
 		try {
 			await sendMessage(parts)
 		} catch (err) {
-			// Error is already set in useSendMessage state and will trigger toast via useEffect
+			// Error is handled by onError callback
 			console.error("Failed to send message:", err)
 		}
 	}
-
-	// Show toast when error occurs
-	useEffect(() => {
-		if (error) {
-			toast.error("Failed to send message", {
-				description: error.message || "An unknown error occurred",
-				duration: 5000,
-			})
-		}
-	}, [error])
 
 	return (
 		<DebugPanelContext.Provider value={{ isOpen: debugPanelOpen, toggle: toggleDebugPanel }}>

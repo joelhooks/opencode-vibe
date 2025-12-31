@@ -2,6 +2,13 @@
  * React hooks for OpenCode
  */
 
+// Unified Facade
+export {
+	useSession,
+	type UseSessionOptions,
+	type UseSessionReturn,
+} from "./hooks/use-session-facade"
+
 export {
 	useSSE,
 	type UseSSEOptions,

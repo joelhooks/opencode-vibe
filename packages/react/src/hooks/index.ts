@@ -4,6 +4,13 @@
 
 // === Public API (Stable) ===
 
+// Unified Facade
+export {
+	useSession,
+	type UseSessionOptions,
+	type UseSessionReturn,
+} from "./use-session-facade"
+
 // Data Fetching
 export { useSessionList } from "./use-session-list"
 export { useSessionData } from "./use-session-data"
