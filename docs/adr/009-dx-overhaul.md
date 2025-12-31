@@ -1,7 +1,7 @@
 # ADR 009: Developer Experience Overhaul
 
 **Status:** In Progress  
-**Date:** 2025-12-30 (Updated)  
+**Date:** 2025-12-31 (Updated)  
 **Deciders:** Joel Hooks, Architecture Team  
 **Affected Components:** React package, web app, SDK integration  
 **Related ADRs:** ADR-001 (Next.js Rebuild), ADR-010 (Store Architecture)
@@ -17,7 +17,7 @@ Overhaul opencode-vibe's React DX to match uploadthing-level simplicity:
 
 ---
 
-## What's Done (ADR-010 Complete)
+## Completed Work
 
 ### Store Architecture (ADR-010) - COMPLETE
 
@@ -35,126 +35,74 @@ packages/react/src/store/
 - SSE events flow to store via `useMultiServerSSE({ onEvent })`
 - Hooks are pure selectors (no local state)
 - Binary search for O(log n) updates
-- 678 tests passing, no infinite loops
+- 688 tests passing, no infinite loops
 
 **Lessons learned (stored in Hivemind):**
 1. Never use `.map()/.filter()` inside Zustand selectors - use `useMemo`
 2. Wire SSE to store at provider level, not in components
 3. Use `getState()` for actions in effects to avoid infinite loops
 
+### Phase 1: Delete Zombie Re-export Layer - COMPLETE ✅
+
+**PR:** [#4](https://github.com/joelhooks/opencode-vibe/pull/4)
+
+- Migrated 14 files from `@/react` to `@opencode-vibe/react`
+- Deleted `apps/web/src/react/` directory (index.ts + README.md)
+- ONE import path now: `@opencode-vibe/react`
+
+### Phase 2: Delete Dead Code - COMPLETE ✅
+
+**PR:** [#5](https://github.com/joelhooks/opencode-vibe/pull/5)
+
+- Updated `PromptInput.tsx` to import from `@opencode-vibe/core/utils`
+- Deleted `apps/web/src/lib/prompt-parsing.ts` (dead re-export)
+
+### Phase 3: Move Internal Hooks - COMPLETE ✅
+
+**PR:** [#6](https://github.com/joelhooks/opencode-vibe/pull/6)
+
+- Created `packages/react/src/hooks/internal/` directory
+- Moved 13 hooks + their test files to internal/
+- Created `internal/index.ts` barrel export
+- Maintained backward compatibility via re-exports with `@internal` JSDoc
+- Public API reduced from 30+ to ~10 exports
+
+**New directory structure:**
+```
+packages/react/src/hooks/
+├── internal/
+│   ├── index.ts              # Barrel export
+│   ├── use-messages.ts
+│   ├── use-parts.ts
+│   ├── use-messages-with-parts.ts
+│   ├── use-session-status.ts
+│   ├── use-context-usage.ts
+│   ├── use-compaction-state.ts
+│   ├── use-subagent-sync.ts
+│   ├── use-subagent.ts
+│   ├── use-subagents.ts
+│   ├── use-sse.ts
+│   ├── use-multi-server-sse.ts
+│   ├── use-live-time.ts
+│   ├── use-provider.ts
+│   └── *.test.ts files
+├── use-session.ts            # PUBLIC
+├── use-session-list.ts       # PUBLIC
+├── use-servers.ts            # PUBLIC
+├── use-providers.ts          # PUBLIC
+├── use-send-message.ts       # PUBLIC
+├── use-create-session.ts     # PUBLIC
+├── use-file-search.ts        # PUBLIC
+├── use-commands.ts           # PUBLIC
+├── use-projects.ts           # PUBLIC
+└── index.ts                  # Re-exports public + internal (for compat)
+```
+
 ---
 
-## Remaining Work (6 Phases)
+## Remaining Work (3 Phases)
 
-Each phase is designed to fit in a single agent context (~30 min each).
-
-### Phase 1: Delete Zombie Re-export Layer (30 min)
-
-**Goal:** ONE import path - delete `apps/web/src/react/`
-
-**Files to delete:**
-- `apps/web/src/react/index.ts`
-- `apps/web/src/react/README.md`
-
-**Migration:**
-```bash
-# Find all imports
-rg "from \"@/react\"" apps/web/src -l
-
-# Replace with direct package import
-# @/react → @opencode-vibe/react
-
-# Update tsconfig.json - remove @/react alias
-```
-
-**Affected files:** ~14 files in `apps/web/src/`
-
-**Success criteria:**
-- [ ] `apps/web/src/react/` deleted
-- [ ] All imports use `@opencode-vibe/react`
-- [ ] `bun run typecheck` passes
-- [ ] `bun run test` passes (678 tests)
-
----
-
-### Phase 2: Delete Dead Code (15 min)
-
-**Goal:** Remove unused files
-
-**Files to delete:**
-- `apps/web/src/lib/prompt-parsing.ts` (zero usages, pure re-export)
-
-**Verification:**
-```bash
-# Should return 0 results
-grep -r "prompt-parsing" apps/web/src
-```
-
-**Success criteria:**
-- [ ] Dead file deleted
-- [ ] No broken imports
-- [ ] Tests pass
-
----
-
-### Phase 3: Move Internal Hooks (45 min)
-
-**Goal:** Reduce public API from 30+ to 9 exports
-
-**Create directory:** `packages/react/src/hooks/internal/`
-
-**Move these hooks to internal/ (NOT exported):**
-```
-use-messages.ts
-use-parts.ts
-use-messages-with-parts.ts
-use-session-status.ts
-use-context-usage.ts
-use-compaction-state.ts
-use-subagent-sync.ts
-use-subagent.ts
-use-subagents.ts
-use-sse.ts
-use-multi-server-sse.ts
-use-live-time.ts
-use-provider.ts
-```
-
-**Keep as public exports (9 total):**
-```typescript
-// packages/react/src/index.ts - NEW PUBLIC API
-
-// THE ONE HOOK (future - Phase 5)
-export { useSession } from "./hooks/use-session"
-
-// SETUP
-export { OpencodeProvider } from "./providers"
-
-// ESCAPE HATCHES
-export { useSessionList } from "./hooks/use-session-list"
-export { useServers, useCurrentServer } from "./hooks/use-servers"
-export { useProviders } from "./hooks/use-providers"
-
-// ACTIONS
-export { useSendMessage } from "./hooks/use-send-message"
-export { useCreateSession } from "./hooks/use-create-session"
-
-// UI HELPERS
-export { useFileSearch } from "./hooks/use-file-search"
-export { useCommands } from "./hooks/use-commands"
-
-// STORE (power users)
-export { useOpencodeStore } from "./store"
-```
-
-**Success criteria:**
-- [ ] `internal/` directory created with 13 hooks
-- [ ] Public exports reduced to ~10
-- [ ] Internal hooks import via relative paths
-- [ ] `bun run typecheck` passes
-- [ ] `bun run test` passes
-
----
+Each phase is designed to fit in a single agent context (~30-60 min each).
 
 ### Phase 4: Update Web App Imports (45 min)
 
@@ -297,20 +245,22 @@ These are nice-to-haves for later:
 ## Phase Execution Order
 
 ```
-Phase 1: Delete zombie re-export layer (30 min)
+Phase 1: Delete zombie re-export layer (30 min) ✅ PR #4
     ↓
-Phase 2: Delete dead code (15 min)
+Phase 2: Delete dead code (15 min) ✅ PR #5
     ↓
-Phase 3: Move internal hooks (45 min)
+Phase 3: Move internal hooks (45 min) ✅ PR #6
     ↓
-Phase 4: Update web app imports (45 min)
+Phase 4: Update web app imports (45 min) ⏳
     ↓
-Phase 5: Create facade hook (1 hour)
+Phase 5: Create facade hook (1 hour) ⏳
     ↓
-Phase 6: Migrate SessionLayout (1 hour)
+Phase 6: Migrate SessionLayout (1 hour) ⏳
 ```
 
-**Total estimated time:** 4-5 hours across 6 focused sessions
+**Progress:** 3/6 phases complete (~50%)
+
+**Remaining time:** ~2.5 hours across 3 focused sessions
 
 Each phase is independent and can be done in a single agent context without losing track.
 
