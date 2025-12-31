@@ -33,7 +33,7 @@ import {
 	setCursorPosition,
 	detectAtTrigger,
 	detectSlashTrigger,
-} from "@/lib/prompt-parsing"
+} from "@opencode-vibe/core/utils"
 import { useFileSearch, useCommands } from "@/react"
 import { Autocomplete } from "./Autocomplete"
 import { Button } from "@/components/ui/button"
