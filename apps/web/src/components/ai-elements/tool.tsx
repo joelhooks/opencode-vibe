@@ -19,7 +19,7 @@ import { useState, isValidElement } from "react"
 import { CodeBlock } from "./code-block"
 import { SubagentCurrentActivity } from "./task"
 import { SubagentView } from "./subagent-view"
-import { useSubagent } from "@/react"
+import { useSubagent } from "@opencode-vibe/react"
 
 /**
  * Extract contextual information from tool inputs and state for display in 3-line card.
