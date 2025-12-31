@@ -2,7 +2,7 @@
 
 import { Fragment, useMemo, memo } from "react"
 import type { UIMessage, ChatStatus } from "ai"
-import { useMessagesWithParts, useSessionStatus } from "@/react"
+import { useMessagesWithParts, useSessionStatus } from "@opencode-vibe/react"
 import type { Message as CoreMessage, Part } from "@opencode-vibe/core/types"
 import {
 	transformMessages,

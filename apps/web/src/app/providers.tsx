@@ -12,7 +12,7 @@
 import type { ReactNode } from "react"
 import { ThemeProvider } from "next-themes"
 import { Toaster } from "sonner"
-import { SSEProvider } from "@/react"
+import { SSEProvider } from "@opencode-vibe/react"
 import { OPENCODE_URL } from "@/lib/client"
 
 interface ProvidersProps {

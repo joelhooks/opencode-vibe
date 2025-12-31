@@ -11,7 +11,7 @@
 import { useEffect, useRef, useMemo, memo, useState, useCallback } from "react"
 import Link from "next/link"
 import { motion, AnimatePresence } from "framer-motion"
-import { useSSE, useLiveTime, useOpencode } from "@/react"
+import { useSSE, useLiveTime, useOpencode } from "@opencode-vibe/react"
 import { createClient } from "@/lib/client"
 import type { GlobalEvent } from "@opencode-ai/sdk/client"
 

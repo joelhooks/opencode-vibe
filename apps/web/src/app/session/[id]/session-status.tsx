@@ -14,7 +14,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useSessionStatus, useSSE } from "@/react"
+import { useSessionStatus, useSSE } from "@opencode-vibe/react"
 import { Badge } from "@/components/ui/badge"
 import type { GlobalEvent } from "@opencode-ai/sdk/client"
 

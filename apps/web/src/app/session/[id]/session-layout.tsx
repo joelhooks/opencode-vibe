@@ -12,7 +12,7 @@ import {
 	useOpencode,
 	useSessionStatus,
 	useSubagentSync,
-} from "@/react"
+} from "@opencode-vibe/react"
 import { NewSessionButton } from "./new-session-button"
 import { SessionMessages } from "./session-messages"
 import { PromptInput } from "@/components/prompt"

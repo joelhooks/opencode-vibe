@@ -1,7 +1,7 @@
 "use client"
 
 import React from "react"
-import type { Part } from "@/react"
+import type { Part } from "@opencode-vibe/react"
 
 export type PartRendererProps = {
 	part: Part
