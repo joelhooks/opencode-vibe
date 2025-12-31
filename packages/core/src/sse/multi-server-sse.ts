@@ -129,12 +129,12 @@ export class MultiServerSSE {
 		// First, check if we know which server owns this session
 		const sessionPort = this.sessionToPort.get(sessionId)
 		if (sessionPort) {
-			return `http://127.0.0.1:${sessionPort}`
+			return `/api/sse/${sessionPort}`
 		}
 
 		// Fallback to first port for directory
 		const ports = this.directoryToPorts.get(directory)
-		return ports?.[0] ? `http://127.0.0.1:${ports[0]}` : undefined
+		return ports?.[0] ? `/api/sse/${ports[0]}` : undefined
 	}
 
 	/**
@@ -143,7 +143,7 @@ export class MultiServerSSE {
 	 */
 	getBaseUrlForDirectory(directory: string): string | undefined {
 		const ports = this.directoryToPorts.get(directory)
-		return ports?.[0] ? `http://127.0.0.1:${ports[0]}` : undefined
+		return ports?.[0] ? `/api/sse/${ports[0]}` : undefined
 	}
 
 	/**
@@ -382,7 +382,7 @@ export class MultiServerSSE {
 
 		while (!controller.signal.aborted && this.started) {
 			try {
-				const response = await fetch(`http://127.0.0.1:${port}/global/event`, {
+				const response = await fetch(`/api/sse/${port}`, {
 					signal: controller.signal,
 					headers: {
 						Accept: "text/event-stream",
