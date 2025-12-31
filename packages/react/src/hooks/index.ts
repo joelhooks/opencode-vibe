@@ -6,7 +6,7 @@
 
 // Data Fetching
 export { useSessionList } from "./use-session-list"
-export { useSession } from "./use-session"
+export { useSessionData } from "./use-session-data"
 export {
 	useProjects,
 	useCurrentProject,

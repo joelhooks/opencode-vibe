@@ -1,5 +1,5 @@
 /**
- * useSession - Get session from Zustand store
+ * useSessionData - Get session from Zustand store
  *
  * Returns session data from the store (updated via SSE).
  * No local state, no loading/error - just a selector.
@@ -7,7 +7,7 @@
  * @example
  * ```tsx
  * function SessionView({ sessionId }: { sessionId: string }) {
- *   const session = useSession(sessionId)
+ *   const session = useSessionData(sessionId)
  *
  *   if (!session) return <div>Session not found</div>
  *
@@ -31,7 +31,7 @@ import { useOpencode } from "../providers"
  * @param sessionId - Session ID to retrieve
  * @returns Session or undefined
  */
-export function useSession(sessionId: string): Session | undefined {
+export function useSessionData(sessionId: string): Session | undefined {
 	const { directory } = useOpencode()
 
 	return useOpencodeStore((state) => {

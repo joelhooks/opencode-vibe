@@ -69,7 +69,7 @@ export {
 	type UseCurrentServerReturn,
 	type ServerInfo,
 } from "./hooks/use-servers"
-export { useSession } from "./hooks/use-session"
+export { useSessionData } from "./hooks/use-session-data"
 export { useSessionList } from "./hooks/use-session-list"
 export { useSessionStatus } from "./hooks/internal/use-session-status"
 export type { SessionStatus } from "./store/types"

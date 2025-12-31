@@ -1,5 +1,5 @@
 /**
- * useSession Tests - Pure logic tests
+ * useSessionData Tests - Pure logic tests
  *
  * Tests the Promise API behavior without DOM rendering.
  * The hook is a thin wrapper around sessions.get(), so we test the API contract.
@@ -28,7 +28,7 @@ const mockSession: Session = {
 	},
 }
 
-describe("useSession - Promise API contract", () => {
+describe("useSessionData - Promise API contract", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 	})
