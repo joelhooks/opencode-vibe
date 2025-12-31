@@ -1,9 +1,23 @@
 # ADR 011: SSE Proxy Architecture for Same-Origin Access
 
-**Status:** Proposed  
+**Status:** Accepted (Partial Implementation)  
 **Date:** 2025-12-31  
 **Deciders:** Joel Hooks, Architecture Team  
-**Affected Components:** `packages/core/src/sse/multi-server-sse.ts`, `apps/web/src/app/api/sse/`, Real-time sync
+**Affected Components:** `packages/core/src/sse/multi-server-sse.ts`, `apps/web/src/app/api/sse/`, Real-time sync  
+**Related ADRs:** [ADR-012](./012-provider-removal-ssr.md) (Provider Elimination), [ADR-013](./013-unified-same-origin-architecture.md) (Unified Architecture)
+
+---
+
+## Implementation Status
+
+### ✅ Completed
+- SSE proxy route: `/api/sse/[port]/route.ts`
+- MultiServerSSE updated to use `/api/sse/${port}` for SSE connections
+- SSE connections now work on mobile/Tailscale
+
+### ⏳ Remaining Work
+- **Full API proxy** - SDK client still hits `localhost:4056` directly for non-SSE calls
+- See: **Continuation Prompt** at end of this document
 
 ---
 
@@ -113,57 +127,32 @@ The missing piece: **proxy SSE through the same origin.**
 
 ## Implementation Details
 
-### 1. SSE Proxy Route Handler
+### 1. SSE Proxy Route Handler (✅ DONE)
 
 **File:** `apps/web/src/app/api/sse/[port]/route.ts`
 
 ```typescript
 import { NextRequest, NextResponse } from "next/server"
 
-/**
- * SSE Proxy Route
- *
- * Proxies Server-Sent Events from OpenCode servers through Next.js
- * to solve same-origin policy issues on mobile and Tailscale.
- *
- * Flow:
- * 1. Browser requests /api/sse/[port]
- * 2. This route fetches from http://127.0.0.1:[port]/global/event
- * 3. Pipes the response back to browser with proper SSE headers
- *
- * Why this works:
- * - Browser sees /api/sse/[port] as same origin (no CORS)
- * - Server-to-server fetch has no CORS restrictions
- * - SSE stream is transparently piped through
- */
-
 export async function GET(
   request: NextRequest,
-  { params }: { params: { port: string } }
+  { params }: { params: Promise<{ port: string }> }
 ) {
-  const port = params.port
+  const { port } = await params
 
   // Validate port is a number
   if (!port || !/^\d+$/.test(port)) {
-    return NextResponse.json(
-      { error: "Invalid port number" },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: "Invalid port number" }, { status: 400 })
   }
 
   const portNum = parseInt(port, 10)
 
   // Validate port is in reasonable range
   if (portNum < 1024 || portNum > 65535) {
-    return NextResponse.json(
-      { error: "Port out of valid range" },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: "Port out of valid range" }, { status: 400 })
   }
 
   try {
-    // Fetch from local OpenCode server
-    // Server-to-server fetch has no CORS restrictions
     const response = await fetch(`http://127.0.0.1:${portNum}/global/event`, {
       headers: {
         Accept: "text/event-stream",
@@ -172,512 +161,293 @@ export async function GET(
     })
 
     if (!response.ok) {
-      return NextResponse.json(
-        { error: `Server returned ${response.status}` },
-        { status: response.status }
-      )
+      return NextResponse.json({ error: `Server returned ${response.status}` }, { status: response.status })
     }
 
     if (!response.body) {
-      return NextResponse.json(
-        { error: "No response body" },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: "No response body" }, { status: 500 })
     }
 
-    // Return SSE response with proper headers
-    // Browser will see this as same-origin SSE stream
     return new NextResponse(response.body, {
       status: 200,
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",
-        // Allow browser to keep connection open
         "X-Accel-Buffering": "no",
       },
     })
   } catch (error) {
     console.error(`[SSE Proxy] Failed to connect to port ${port}:`, error)
-
-    return NextResponse.json(
-      {
-        error: "Failed to connect to OpenCode server",
-        message: error instanceof Error ? error.message : "Unknown error",
-      },
-      { status: 503 }
-    )
+    return NextResponse.json({
+      error: "Failed to connect to OpenCode server",
+      message: error instanceof Error ? error.message : "Unknown error",
+    }, { status: 503 })
   }
 }
 ```
 
-### 2. Update MultiServerSSE Base URL Methods
+### 2. Update MultiServerSSE Base URL Methods (✅ DONE)
 
 **File:** `packages/core/src/sse/multi-server-sse.ts`
 
-Replace the hardcoded `http://127.0.0.1:${port}` with proxy URLs:
+Changed to use `/api/sse/${port}` instead of `http://127.0.0.1:${port}`.
 
-```typescript
-/**
- * Get the base URL for a session's server (preferred) or directory's server (fallback)
- * 
- * CHANGED: Now returns proxy URL instead of direct localhost
- * - Old: http://127.0.0.1:${port}
- * - New: /api/sse/${port}
- * 
- * This solves same-origin policy issues on mobile and Tailscale.
- */
-getBaseUrlForSession(sessionId: string, directory: string): string | undefined {
-  // First, check if we know which server owns this session
-  const sessionPort = this.sessionToPort.get(sessionId)
-  if (sessionPort) {
-    return `/api/sse/${sessionPort}`  // ← CHANGED
-  }
+### 3. Full API Proxy (⏳ Phase 2)
 
-  // Fallback to first port for directory
-  const ports = this.directoryToPorts.get(directory)
-  return ports?.[0] ? `/api/sse/${ports[0]}` : undefined  // ← CHANGED
-}
+The SDK client (`createClient`) still uses `http://localhost:4056` for non-SSE API calls. Need to proxy ALL API calls through Next.js.
 
-/**
- * Get the base URL for a directory's server (first one if multiple)
- * Returns undefined if no server found for this directory
- * 
- * CHANGED: Now returns proxy URL instead of direct localhost
- */
-getBaseUrlForDirectory(directory: string): string | undefined {
-  const ports = this.directoryToPorts.get(directory)
-  return ports?.[0] ? `/api/sse/${ports[0]}` : undefined  // ← CHANGED
-}
+#### Phase 2 Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                    Browser (Mobile/Tailscale)                    │
+└────────────────────────┬─────────────────────────────────────────┘
+                         │
+                         │ API: /api/opencode/4056/session/list
+                         │ SSE: /api/sse/4056
+                         │ ✅ Both same-origin
+                         ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                  Next.js Server (Proxy Layer)                     │
+│                                                                   │
+│  /api/opencode/[port]/[[...path]]/route.ts  →  Proxy ALL API     │
+│  /api/sse/[port]/route.ts                   →  Proxy SSE (done)  │
+└────────────────────────┬─────────────────────────────────────────┘
+                         │
+                         │ Server-to-server (no CORS)
+                         ▼
+┌──────────────────────────────────────────────────────────────────┐
+│              OpenCode Server (localhost:4056)                     │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-### 3. Update SSE Connection in connectToServer()
+#### Implementation: Catch-All API Proxy Route
 
-**File:** `packages/core/src/sse/multi-server-sse.ts:385`
+**File:** `apps/web/src/app/api/opencode/[port]/[[...path]]/route.ts`
 
 ```typescript
-private async connectToServer(port: number) {
-  const controller = new AbortController()
-  this.connections.set(port, controller)
-  this.setConnectionState(port, "connecting")
+import { NextRequest, NextResponse } from "next/server"
 
-  // Initialize backoff counter if not present
-  if (!this.backoffAttempts.has(port)) {
-    this.backoffAttempts.set(port, 0)
+type RouteParams = { params: Promise<{ port: string; path?: string[] }> }
+
+async function proxyRequest(
+  request: NextRequest,
+  { params }: RouteParams,
+  method: string
+) {
+  const { port, path = [] } = await params
+
+  // Validate port
+  if (!port || !/^\d+$/.test(port)) {
+    return NextResponse.json({ error: "Invalid port" }, { status: 400 })
   }
 
-  while (!controller.signal.aborted && this.started) {
-    try {
-      // CHANGED: Use proxy URL instead of direct localhost
-      // Old: const response = await fetch(`http://127.0.0.1:${port}/global/event`, ...)
-      // New: const response = await fetch(`/api/sse/${port}`, ...)
-      const response = await fetch(`/api/sse/${port}`, {
-        signal: controller.signal,
+  const portNum = parseInt(port, 10)
+  if (portNum < 1024 || portNum > 65535) {
+    return NextResponse.json({ error: "Port out of range" }, { status: 400 })
+  }
+
+  // Build target URL
+  const targetPath = path.join("/")
+  const targetUrl = new URL(`http://127.0.0.1:${portNum}/${targetPath}`)
+  
+  // Forward query params
+  request.nextUrl.searchParams.forEach((value, key) => {
+    targetUrl.searchParams.set(key, value)
+  })
+
+  try {
+    // Forward request with body (for POST/PUT/PATCH)
+    const body = ["POST", "PUT", "PATCH"].includes(method)
+      ? await request.text()
+      : undefined
+
+    const response = await fetch(targetUrl.toString(), {
+      method,
+      headers: {
+        "Content-Type": request.headers.get("Content-Type") || "application/json",
+        "Accept": request.headers.get("Accept") || "application/json",
+        // Forward x-opencode-directory header
+        ...(request.headers.get("x-opencode-directory") && {
+          "x-opencode-directory": request.headers.get("x-opencode-directory")!,
+        }),
+      },
+      body,
+    })
+
+    // Check for SSE response (redirect to SSE proxy)
+    if (response.headers.get("Content-Type")?.includes("text/event-stream")) {
+      return new NextResponse(response.body, {
+        status: 200,
         headers: {
-          Accept: "text/event-stream",
+          "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+          "X-Accel-Buffering": "no",
         },
       })
-
-      if (!response.ok || !response.body) {
-        throw new Error(`Failed to connect: ${response.status}`)
-      }
-
-      // ... rest of connection logic unchanged
-    } catch (error) {
-      // ... error handling unchanged
     }
+
+    // Return JSON response
+    const data = await response.json()
+    return NextResponse.json(data, { status: response.status })
+  } catch (error) {
+    console.error(`[API Proxy] Failed to proxy to port ${port}:`, error)
+    return NextResponse.json({
+      error: "Failed to connect to OpenCode server",
+      message: error instanceof Error ? error.message : "Unknown error",
+    }, { status: 503 })
   }
 }
+
+export async function GET(request: NextRequest, params: RouteParams) {
+  return proxyRequest(request, params, "GET")
+}
+
+export async function POST(request: NextRequest, params: RouteParams) {
+  return proxyRequest(request, params, "POST")
+}
+
+export async function PUT(request: NextRequest, params: RouteParams) {
+  return proxyRequest(request, params, "PUT")
+}
+
+export async function PATCH(request: NextRequest, params: RouteParams) {
+  return proxyRequest(request, params, "PATCH")
+}
+
+export async function DELETE(request: NextRequest, params: RouteParams) {
+  return proxyRequest(request, params, "DELETE")
+}
 ```
 
----
+#### SDK Client Updates
 
-## Architecture Diagram
+**File:** `packages/core/src/client/client.ts`
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         BROWSER LAYER                               │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  MultiServerSSE (packages/core/src/sse/multi-server-sse.ts)         │
-│  ├─ discover() → /api/opencode-servers                              │
-│  │  └─ Returns: [{ port: 4056, directory: "/path" }, ...]          │
-│  │                                                                   │
-│  └─ connectToServer(port) → /api/sse/[port]  ← NEW PROXY            │
-│     └─ Receives SSE stream from proxy                               │
-│                                                                      │
-│  OpencodeProvider (packages/react/src/providers/)                   │
-│  └─ useMultiServerSSE({ onEvent: handleEvent })                     │
-│     └─ Wires SSE events to Zustand store                            │
-│                                                                      │
-└────────────────────────┬──────────────────────────────────────────────┘
-                         │
-                         │ HTTP/1.1 (same origin)
-                         │
-┌────────────────────────▼──────────────────────────────────────────────┐
-│                      NEXT.JS SERVER LAYER                             │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  /api/opencode-servers/route.ts (existing)                          │
-│  └─ Discovers running servers via lsof                              │
-│     └─ Returns: [{ port, pid, directory }, ...]                     │
-│                                                                      │
-│  /api/sse/[port]/route.ts (NEW)                                     │
-│  ├─ Validates port number                                           │
-│  ├─ Fetches from http://127.0.0.1:[port]/global/event               │
-│  └─ Pipes response back to browser with SSE headers                 │
-│                                                                      │
-└────────────────────────┬──────────────────────────────────────────────┘
-                         │
-                         │ HTTP/1.1 (server-to-server, no CORS)
-                         │
-┌────────────────────────▼──────────────────────────────────────────────┐
-│                    OPENCODE SERVER LAYER                              │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  /global/event (SSE endpoint)                                        │
-│  ├─ Sends heartbeats every 30s                                       │
-│  ├─ Sends session.status events                                      │
-│  ├─ Sends message.created events                                     │
-│  ├─ Sends message.part.created events                                │
-│  └─ Sends message.part.updated events                                │
-│                                                                      │
-└──────────────────────────────────────────────────────────────────────┘
-```
+Update URL generation to use proxy:
 
----
+```typescript
+// Before (direct localhost)
+function getBaseUrl(port: number): string {
+  return `http://127.0.0.1:${port}`
+}
 
-## Connection Lifecycle
-
-### Startup Sequence
-
-```
-1. Browser loads Next.js app
-   ↓
-2. OpencodeProvider mounts
-   ↓
-3. useMultiServerSSE() hook initializes
-   ↓
-4. MultiServerSSE.start() called
-   ↓
-5. discover() fetches /api/opencode-servers
-   ├─ Returns: [{ port: 4056, directory: "/path" }, ...]
-   ↓
-6. For each discovered port, connectToServer(port)
-   ├─ Fetches /api/sse/4056
-   ├─ Next.js proxy fetches http://127.0.0.1:4056/global/event
-   ├─ SSE stream established
-   ↓
-7. EventSourceParserStream parses incoming events
-   ↓
-8. handleEvent() dispatches to store.handleSSEEvent()
-   ↓
-9. Zustand store updates via Immer
-   ↓
-10. Components re-render via selectors
-```
-
-### Heartbeat & Health Monitoring
-
-```
-Every 30s from OpenCode server:
-  heartbeat event → /api/sse/[port] → browser
-  ↓
-MultiServerSSE.recordEventReceived(port)
-  ↓
-lastEventTimes.set(port, Date.now())
-
-Every 10s, checkConnectionHealth():
-  if (now - lastEventTime > 60s) {
-    Force reconnect with backoff
+// After (proxy through Next.js)
+function getBaseUrl(port: number): string {
+  // In browser, use same-origin proxy
+  if (typeof window !== "undefined") {
+    return `/api/opencode/${port}`
   }
-```
-
-### Reconnection with Exponential Backoff
-
-```
-Connection fails:
-  ↓
-Calculate backoff: min(1000 * 2^attempt, 30000) + jitter
-  ↓
-Wait delay milliseconds
-  ↓
-Retry connectToServer(port)
-  ↓
-Max backoff: 30 seconds
-Jitter: ±20% to prevent thundering herd
-```
-
----
-
-## Migration Path for MultiServerSSE
-
-### Phase 1: Implement Proxy Route (Week 1)
-
-1. Create `/api/sse/[port]/route.ts` with validation and error handling
-2. Add comprehensive logging for debugging
-3. Test locally with `http://localhost:3000/api/sse/4056`
-
-### Phase 2: Update MultiServerSSE (Week 1)
-
-1. Change `getBaseUrlForSession()` to return `/api/sse/${port}`
-2. Change `getBaseUrlForDirectory()` to return `/api/sse/${port}`
-3. Change `connectToServer()` to fetch from `/api/sse/${port}`
-4. No changes to event parsing or store wiring needed
-
-### Phase 3: Testing (Week 2)
-
-1. **Unit tests:** Validate port parsing and error cases
-2. **Integration tests:** Verify SSE events flow through proxy
-3. **Mobile testing:** Test on actual phone via Tailscale
-4. **Stress testing:** Verify backoff and reconnection under load
-
-### Phase 4: Rollout (Week 2)
-
-1. Deploy to staging
-2. Monitor error rates and connection health
-3. Deploy to production
-4. Remove old hardcoded `http://127.0.0.1` references
-
----
-
-## Consequences
-
-### Positive
-
-✅ **Solves CORS issues** - SSE works on mobile and Tailscale  
-✅ **Transparent to clients** - No changes to `useMultiServerSSE()` hook  
-✅ **Minimal code changes** - Only 3 methods in `MultiServerSSE` need updates  
-✅ **Leverages existing discovery** - Reuses `/api/opencode-servers` pattern  
-✅ **Server-to-server fetch** - No CORS restrictions, more reliable  
-✅ **Works everywhere** - Localhost, mobile, Tailscale, all the same  
-✅ **Debugging friendly** - Proxy route can log all events for troubleshooting  
-
-### Negative
-
-❌ **Extra network hop** - Browser → Next.js → OpenCode server (vs direct)  
-❌ **Proxy latency** - ~10-50ms added per event (acceptable for SSE)  
-❌ **Memory usage** - Next.js server holds open connections for each browser client  
-❌ **Scaling concern** - Many concurrent SSE connections could stress Node.js  
-
-### Mitigations
-
-- **Latency:** SSE is designed for high-latency scenarios (heartbeats every 30s)
-- **Memory:** Use connection pooling if needed (future optimization)
-- **Scaling:** Monitor connection count, implement limits if necessary
-
----
-
-## Alternatives Considered
-
-### 1. CORS Headers on OpenCode Server
-
-**Rejected:** OpenCode server is not a web server. Adding CORS headers is wrong:
-- Exposes internal API to arbitrary origins
-- Security risk if server is exposed to internet
-- Violates separation of concerns
-
-### 2. Direct Localhost Connection from Mobile
-
-**Rejected:** Impossible on mobile:
-- `127.0.0.1` on phone refers to phone's localhost, not Mac
-- No way to reach Mac's localhost from phone without proxy
-
-### 3. WebSocket Instead of SSE
-
-**Rejected:** SSE is already working:
-- Simpler protocol than WebSocket
-- Better browser support
-- Easier to debug (plain HTTP)
-- No need to rewrite event handling
-
-### 4. Reverse Proxy (nginx/caddy)
-
-**Rejected:** Adds deployment complexity:
-- Requires separate reverse proxy process
-- More configuration to manage
-- Next.js can handle this natively
-
-### 5. Service Worker Interception
-
-**Rejected:** Overly complex:
-- Service workers can't intercept EventSource
-- Would need to rewrite SSE as fetch polling
-- Defeats purpose of SSE
-
----
-
-## Testing Strategy
-
-### Unit Tests
-
-```typescript
-// apps/web/src/app/api/sse/[port]/route.test.ts
-
-describe("SSE Proxy Route", () => {
-  it("rejects invalid port numbers", async () => {
-    const response = await GET(mockRequest, { params: { port: "abc" } })
-    expect(response.status).toBe(400)
-  })
-
-  it("rejects ports outside valid range", async () => {
-    const response = await GET(mockRequest, { params: { port: "99999" } })
-    expect(response.status).toBe(400)
-  })
-
-  it("returns 503 when server is unreachable", async () => {
-    // Mock fetch to fail
-    const response = await GET(mockRequest, { params: { port: "9999" } })
-    expect(response.status).toBe(503)
-  })
-
-  it("proxies successful SSE response", async () => {
-    // Mock fetch to return SSE stream
-    const response = await GET(mockRequest, { params: { port: "4056" } })
-    expect(response.status).toBe(200)
-    expect(response.headers.get("Content-Type")).toBe("text/event-stream")
-  })
-})
-```
-
-### Integration Tests
-
-```typescript
-// packages/core/src/sse/multi-server-sse.test.ts
-
-describe("MultiServerSSE with Proxy", () => {
-  it("discovers servers via /api/opencode-servers", async () => {
-    const manager = new MultiServerSSE()
-    manager.start()
-    
-    await waitFor(() => {
-      expect(manager.getPortsForDirectory("/path")).toContain(4056)
-    })
-  })
-
-  it("connects to servers via /api/sse/[port]", async () => {
-    const manager = new MultiServerSSE()
-    const events: SSEEvent[] = []
-    
-    manager.onEvent((event) => events.push(event))
-    manager.start()
-    
-    await waitFor(() => {
-      expect(events.length).toBeGreaterThan(0)
-    })
-  })
-
-  it("reconnects on connection failure", async () => {
-    // Simulate server crash and restart
-    // Verify reconnection with backoff
-  })
-})
-```
-
-### Mobile Testing
-
-```
-1. Start OpenCode server on Mac
-2. Connect phone to Tailscale
-3. Open browser on phone: http://dark-wizard.tail7af24.ts.net:3000
-4. Verify SSE connections in Network tab
-5. Verify real-time updates (messages, status changes)
-6. Verify reconnection after network interruption
-```
-
----
-
-## Monitoring & Observability
-
-### Logging
-
-```typescript
-// In proxy route
-console.log(`[SSE Proxy] Request to /api/sse/${port}`)
-console.log(`[SSE Proxy] Connecting to http://127.0.0.1:${port}/global/event`)
-console.log(`[SSE Proxy] Connected, streaming to browser`)
-console.error(`[SSE Proxy] Connection failed: ${error.message}`)
-
-// In MultiServerSSE
-console.debug(`[MultiServerSSE] Connecting to /api/sse/${port}`)
-console.debug(`[MultiServerSSE] Port ${port}: disconnected → connecting`)
-console.debug(`[MultiServerSSE] Heartbeat received from port ${port}`)
-```
-
-### Metrics to Track
-
-- Connection success rate per port
-- Average event latency (browser → proxy → server)
-- Reconnection frequency and backoff distribution
-- Concurrent SSE connections
-- Proxy route error rates
-
-### Debug Panel
-
-Add to debug panel in web app:
-
-```typescript
-{
-  "sse": {
-    "connections": {
-      "4056": {
-        "state": "connected",
-        "lastEvent": "2025-12-31T12:34:56Z",
-        "eventCount": 1234,
-        "latency": "45ms"
-      }
-    },
-    "totalEvents": 5678,
-    "reconnections": 2
-  }
+  // On server, direct access is fine
+  return `http://127.0.0.1:${port}`
 }
 ```
 
+#### Phase 2 Success Criteria
+
+- [ ] `/api/opencode/[port]/[[...path]]` route created
+- [ ] All HTTP methods proxied (GET, POST, PUT, PATCH, DELETE)
+- [ ] Query params forwarded
+- [ ] Request body forwarded for POST/PUT/PATCH
+- [ ] `x-opencode-directory` header forwarded
+- [ ] SDK client uses proxy in browser, direct on server
+- [ ] Mobile/Tailscale can load sessions, messages, providers
+- [ ] Tests pass, typecheck passes
+
+> **See also:** [ADR-013: Unified Same-Origin Architecture](./013-unified-same-origin-architecture.md) for the complete picture of how this integrates with provider elimination.
+
 ---
 
-## Future Optimizations
+## Continuation Prompt
 
-### 1. Connection Pooling
+The following prompt can be used to continue this work in a fresh context:
 
-If many browser clients connect, pool connections to reduce server load:
+---
 
-```typescript
-// Reuse single connection for multiple clients
-const connectionPool = new Map<number, ReadableStream>()
+```markdown
+# Task: Implement Full API Proxy for OpenCode (ADR-011 Phase 2)
 
-// Multiple browsers → single upstream connection
+## Context
+
+ADR-011 Phase 1 is complete - SSE connections now proxy through `/api/sse/[port]`. But the SDK client still hits `localhost:4056` directly for API calls (sessions, messages, providers), causing CORS errors on mobile/Tailscale.
+
+## Current State
+
+- ✅ SSE proxy works: `/api/sse/[port]/route.ts`
+- ✅ MultiServerSSE uses proxy for SSE
+- ❌ SDK client (`createClient`) still uses `http://localhost:4056` for API calls
+- ❌ CORS errors on mobile for: `/session`, `/provider`, `/session/status`, etc.
+
+## Goal
+
+Proxy ALL OpenCode API calls through Next.js, following the uploadthing pattern.
+
+## Architecture Reference
+
+The codebase already has a router system inspired by uploadthing:
+
+```
+packages/core/src/router/
+├── adapters/
+│   ├── next.ts          # createNextHandler, createAction
+│   └── direct.ts        # createCaller for direct invocation
+├── builder.ts           # Route builder with Zod validation
+├── routes.ts            # Route definitions
+├── executor.ts          # Effect-based execution
+└── stream.ts            # SSE streaming support
 ```
 
-### 2. Event Filtering
+Key patterns from `adapters/next.ts`:
+- `createNextHandler()` - Creates API route handler from router
+- `createAction()` - Creates Server Action from route
+- Routes resolve via `?path=session.list` query param
+- Streaming routes return SSE format
 
-Filter events at proxy to reduce bandwidth:
+## Implementation Plan
 
-```typescript
-// Only send events for directories the browser cares about
-if (event.directory === requestedDirectory) {
-  controller.enqueue(encoded)
-}
-```
+### Option A: Extend Existing Router (Recommended)
 
-### 3. Compression
+1. **Create catch-all proxy route** at `/api/opencode/[port]/[[...path]]/route.ts`
+   - Proxies any request to `http://127.0.0.1:${port}/${path}`
+   - Preserves headers, body, method
+   - Returns proxied response
 
-Compress SSE stream if client supports it:
+2. **Update `createClient()`** in `packages/core/src/client/client.ts`
+   - Change `getBaseUrlForSession()` to return `/api/opencode/${port}` (not `/api/sse/${port}`)
+   - Change `getBaseUrlForDirectory()` similarly
+   - SSE-specific calls can still use `/api/sse/${port}`
 
-```typescript
-// Add gzip compression for large event payloads
-headers: {
-  "Content-Encoding": "gzip",
-}
-```
+3. **Or: Use the router pattern**
+   - Route all SDK calls through `createNextHandler()`
+   - Single endpoint: `/api/opencode/route.ts`
+   - Routes resolve via `?path=session.list&port=4056`
 
-### 4. Rate Limiting
+### Option B: Separate SSE and API Proxies
 
-Prevent proxy from being overwhelmed:
+Keep `/api/sse/[port]` for SSE, add `/api/opencode/[port]/[...path]` for API.
 
-```typescript
-// Limit concurrent connections per IP
-// Limit events per second
+## Files to Modify
+
+1. `apps/web/src/app/api/opencode/[port]/[[...path]]/route.ts` - NEW proxy
+2. `packages/core/src/client/client.ts` - Update URL generation
+3. `packages/core/src/sse/multi-server-sse.ts` - Separate SSE vs API URLs
+
+## Success Criteria
+
+- [ ] All API calls proxy through Next.js (no direct localhost)
+- [ ] Mobile/Tailscale can load sessions, messages, providers
+- [ ] SSE still works via `/api/sse/[port]`
+- [ ] Tests pass
+- [ ] Typecheck passes
+
+## Related
+
+- ADR-011: `docs/adr/011-sse-proxy-architecture.md`
+- Bug cell: `opencode-next--xts0a-mjtfdahejym`
+- Router code: `packages/core/src/router/`
+- uploadthing pattern: https://github.com/pingdotgg/uploadthing
 ```
 
 ---
@@ -690,6 +460,7 @@ Prevent proxy from being overwhelmed:
 - **Same-Origin Policy:** https://developer.mozilla.org/en-US/docs/Web/Security/Same-origin_policy
 - **Current MultiServerSSE:** `packages/core/src/sse/multi-server-sse.ts`
 - **Discovery Pattern:** `apps/web/src/app/api/opencode-servers/route.ts`
+- **uploadthing:** https://github.com/pingdotgg/uploadthing
 
 ---
 
@@ -697,8 +468,12 @@ Prevent proxy from being overwhelmed:
 
 This ADR proposes a minimal, non-breaking change to solve a critical mobile/Tailscale issue. The proxy pattern is proven (discovery already uses it), requires only 3 method changes, and maintains full backward compatibility with existing SSE wiring.
 
-**Next Steps:**
-1. Implement `/api/sse/[port]/route.ts`
-2. Update `MultiServerSSE` base URL methods
-3. Test on mobile and Tailscale
-4. Deploy to production
+**Phase 1 Complete:**
+1. ✅ Implemented `/api/sse/[port]/route.ts`
+2. ✅ Updated `MultiServerSSE` base URL methods
+3. ✅ SSE works on mobile/Tailscale
+
+**Phase 2 TODO:**
+4. ⏳ Implement full API proxy
+5. ⏳ Update SDK client to use proxy
+6. ⏳ Test on mobile and Tailscale
