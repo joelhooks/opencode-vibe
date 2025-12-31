@@ -15,12 +15,12 @@
         "@changesets/cli": "^2.29.8",
         "@types/bun": "latest",
         "@types/jsdom": "^27.0.0",
-        "@typescript/native-preview": "^7.0.0-dev.20251226.1",
+        "@typescript/native-preview": "^7.0.0-dev.20251230.1",
         "@vitest/coverage-v8": "^4.0.16",
         "happy-dom": "^20.0.11",
         "jsdom": "^27.4.0",
         "msw": "^2.12.7",
-        "oxlint": "^1.35.0",
+        "oxlint": "^1.36.0",
         "turbo": "^2.7.2",
         "vitest": "^4.0.16",
       },
@@ -85,7 +85,7 @@
     },
     "packages/core": {
       "name": "@opencode-vibe/core",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "effect": "^3.19.0",
         "eventsource-parser": "^3.0.6",
@@ -101,7 +101,7 @@
     },
     "packages/react": {
       "name": "@opencode-vibe/react",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "dependencies": {
         "@opencode-vibe/core": "workspace:*",
         "eventsource-parser": "^3.0.0",
