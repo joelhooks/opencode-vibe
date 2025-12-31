@@ -196,6 +196,47 @@ bun run test:coverage     # Runs: vitest run --coverage
 
 ## Conventions
 
+### Changesets (Non-Negotiable)
+
+**Every changeset MUST include:**
+
+1. **A relevant quote from pdf-brain** - Search for wisdom related to your change
+2. **Sick ASCII art** - Creative, characters, weird. Make it memorable.
+
+```bash
+# Find a quote
+pdf-brain_search(query="<topic related to your change>")
+
+# Example changeset:
+---
+"@opencode-vibe/core": minor
+---
+
+feat(api): add session caching layer
+
+```
+    ╔═══════════════════════════════════════╗
+    ║  🧠 CACHE ME OUTSIDE, HOW BOW DAH 🧠  ║
+    ╠═══════════════════════════════════════╣
+    ║     ┌─────────┐                       ║
+    ║     │ REQUEST │──┐                    ║
+    ║     └─────────┘  │  ┌───────┐         ║
+    ║                  ├──│ CACHE │         ║
+    ║     ┌─────────┐  │  └───────┘         ║
+    ║     │ BACKEND │──┘                    ║
+    ║     └─────────┘                       ║
+    ╚═══════════════════════════════════════╝
+```
+
+> "The purpose of abstraction is not to be vague, but to create
+> a new semantic level in which one can be absolutely precise."
+> — Dijkstra, via pdf-brain
+
+Adds LRU cache for session lookups, reducing backend calls by 80%.
+```
+
+**Why?** Changesets get read. Make them worth reading. The quote grounds the work in wisdom. The art makes it memorable.
+
 ### TDD (Non-Negotiable)
 
 ```
