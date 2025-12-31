@@ -1,6 +1,6 @@
 "use client"
 
-import { useContextUsage, formatTokens } from "@/react"
+import { useContextUsage, formatTokens } from "@opencode-vibe/react"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
 

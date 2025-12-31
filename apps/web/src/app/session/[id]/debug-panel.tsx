@@ -7,7 +7,7 @@ import {
 	useMessagesWithParts,
 	useParts,
 	type OpencodeMessage,
-} from "@/react"
+} from "@opencode-vibe/react"
 import { multiServerSSE } from "@opencode-vibe/core/sse"
 
 interface DebugPanelProps {

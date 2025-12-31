@@ -34,7 +34,7 @@ import {
 	detectAtTrigger,
 	detectSlashTrigger,
 } from "@/lib/prompt-parsing"
-import { useFileSearch, useCommands } from "@/react"
+import { useFileSearch, useCommands } from "@opencode-vibe/react"
 import { Autocomplete } from "./Autocomplete"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
