@@ -1,4 +1,4 @@
-# ADR 011: Provider-Free Architecture with SSR Hydration
+# ADR 012: Provider-Free Architecture with SSR Hydration
 
 **Status:** Proposed  
 **Date:** 2025-12-31  
