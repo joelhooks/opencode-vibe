@@ -8,24 +8,19 @@
  * Sessions auto-sort by last activity with smooth animations.
  */
 
-import { useEffect, useRef, useMemo, memo, useState } from "react"
+import { useMemo, memo, useState, useEffect } from "react"
 import Link from "next/link"
 import { motion, AnimatePresence } from "framer-motion"
-import { useLiveTime, useConnectionStatus } from "@/app/hooks"
-import { useOpencodeStore } from "@opencode-vibe/react/store"
-import { createClient } from "@opencode-vibe/core/client"
+import { useLiveTime, useConnectionStatus, useSSEEvents } from "@/app/hooks"
+import {
+	useMultiDirectorySessions,
+	useMultiDirectoryStatus,
+	type SessionDisplay,
+} from "@opencode-vibe/react"
 import { SSEDebugPanel } from "@/components/sse-debug-panel"
 
 // Session status type (extracted from SSE event payload)
 type SessionStatusValue = "running" | "pending" | "completed" | "error"
-
-interface SessionDisplay {
-	id: string
-	title: string
-	directory: string
-	formattedTime: string // Server-rendered initial value
-	timestamp: number // For live client-side updates
-}
 
 interface Project {
 	id: string
@@ -220,13 +215,20 @@ function NewSessionButton({ directory }: { directory: string }) {
 /**
  * SSE Connection indicator with debug panel
  * Shows green when connected, red when discovering, opens debug panel on click
+ *
+ * Uses mounted state to avoid hydration mismatch between server and client.
  */
 function SSEStatus() {
 	const [debugPanelOpen, setDebugPanelOpen] = useState(false)
+	const [mounted, setMounted] = useState(false)
 
 	// Use the new useConnectionStatus hook from factory
 	// This polls multiServerSSE for actual connection state
 	const { connected, serverCount, discovering } = useConnectionStatus()
+
+	useEffect(() => {
+		setMounted(true)
+	}, [])
 
 	const getStatusColor = () => {
 		if (connected) return "bg-green-500"
@@ -240,6 +242,20 @@ function SSEStatus() {
 		return "disconnected"
 	}
 
+	// Return consistent placeholder during SSR and initial hydration
+	if (!mounted) {
+		return (
+			<button
+				type="button"
+				className="fixed bottom-4 right-4 flex items-center gap-2 text-xs text-muted-foreground bg-card border border-border rounded-full px-3 py-1 hover:bg-secondary transition-colors cursor-pointer"
+			>
+				<span className="w-2 h-2 rounded-full bg-gray-500" />
+				SSE initializing...
+			</button>
+		)
+	}
+
+	// Real status after mount
 	return (
 		<>
 			<button
@@ -257,181 +273,41 @@ function SSEStatus() {
 }
 
 /**
- * Derive session status from the last message
- * A session is "busy" if the last message is an assistant message without a completed time
- */
-function deriveSessionStatus(
-	messages: Array<{
-		info: { role: string; time?: { created: number; completed?: number } }
-	}>,
-): "running" | "completed" {
-	const lastMessage = messages[messages.length - 1]
-	if (!lastMessage) return "completed"
-
-	// Session is busy if last message is assistant without completed time
-	if (lastMessage.info.role === "assistant" && !lastMessage.info.time?.completed) {
-		return "running"
-	}
-
-	return "completed"
-}
-
-/** How long to keep "running" indicator lit after streaming ends */
-const IDLE_COOLDOWN_MS = 60_000 // 1 minute
-
-/**
- * Hook to manage session statuses across all projects
- * Handles bootstrap and SSE updates with cooldown on idle
- */
-function useSessionStatuses(projects: ProjectWithSessions[]) {
-	// Map of sessionId -> status
-	const [sessionStatuses, setSessionStatuses] = useState<Record<string, SessionStatusValue>>({})
-	// Map of sessionId -> last activity timestamp
-	const [lastActivity, setLastActivity] = useState<Record<string, number>>({})
-
-	const bootstrappedRef = useRef(false)
-	// Track cooldown timers per session
-	const cooldownTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
-
-	// Cleanup all timers on unmount
-	useEffect(() => {
-		return () => {
-			for (const timer of cooldownTimersRef.current.values()) {
-				clearTimeout(timer)
-			}
-		}
-	}, [])
-
-	// Bootstrap session statuses for recent sessions on mount
-	useEffect(() => {
-		// Only bootstrap once
-		if (bootstrappedRef.current) return
-		bootstrappedRef.current = true
-
-		async function bootstrap() {
-			// Fetch status for each project in parallel
-			await Promise.all(
-				projects.map(async ({ project, sessions }) => {
-					try {
-						const client = await createClient(project.worktree)
-
-						// Only check recent sessions (updated in last 5 minutes) - likely active
-						const recentSessions = sessions.filter((s) => {
-							return s.formattedTime.includes("just now") || s.formattedTime.includes("m ago")
-						})
-
-						// Check each recent session's messages to derive status
-						await Promise.all(
-							recentSessions.slice(0, 10).map(async (session) => {
-								try {
-									const messagesResponse = await client.session.messages({
-										path: { id: session.id },
-										query: { limit: 1 }, // Only need last message
-									})
-
-									const messages = messagesResponse.data ?? []
-									const status = deriveSessionStatus(messages)
-
-									if (status === "running") {
-										setSessionStatuses((prev) => ({
-											...prev,
-											[session.id]: "running",
-										}))
-									}
-								} catch {
-									// Ignore individual session errors
-								}
-							}),
-						)
-					} catch (error) {
-						console.error(`Failed to fetch status for ${project.worktree}:`, error)
-					}
-				}),
-			)
-		}
-
-		bootstrap()
-	}, [projects])
-
-	// Subscribe to session status changes from store
-	// The store is already synced via useSSESync in the provider
-	// We just need to react to status changes
-	useEffect(() => {
-		// Get unique directories for filtering
-		const directories = new Set(projects.map((p) => p.project.worktree))
-
-		// Subscribe to store updates for our directories
-		const unsubscribe = useOpencodeStore.subscribe((state) => {
-			for (const directory of directories) {
-				const dirState = state.directories[directory]
-				if (!dirState) continue
-
-				const sessionStatuses = dirState.sessionStatus
-
-				// Update session statuses from store
-				for (const [sessionId, status] of Object.entries(sessionStatuses)) {
-					const statusValue = status as SessionStatusValue
-
-					if (statusValue === "running") {
-						// Cancel any pending cooldown
-						const existingTimer = cooldownTimersRef.current.get(sessionId)
-						if (existingTimer) {
-							clearTimeout(existingTimer)
-							cooldownTimersRef.current.delete(sessionId)
-						}
-
-						setSessionStatuses((prev) => ({
-							...prev,
-							[sessionId]: "running",
-						}))
-						setLastActivity((prev) => ({
-							...prev,
-							[sessionId]: Date.now(),
-						}))
-					} else if (statusValue === "completed") {
-						// Update last activity
-						setLastActivity((prev) => ({
-							...prev,
-							[sessionId]: Date.now(),
-						}))
-
-						// Start cooldown
-						const existingTimer = cooldownTimersRef.current.get(sessionId)
-						if (existingTimer) {
-							clearTimeout(existingTimer)
-						}
-
-						const timer = setTimeout(() => {
-							setSessionStatuses((prev) => ({
-								...prev,
-								[sessionId]: "completed",
-							}))
-							cooldownTimersRef.current.delete(sessionId)
-						}, IDLE_COOLDOWN_MS)
-
-						cooldownTimersRef.current.set(sessionId, timer)
-					}
-				}
-			}
-		})
-
-		return unsubscribe
-	}, [projects])
-
-	return { sessionStatuses, lastActivity }
-}
-
-/**
  * ProjectsList - Renders projects with live session status
  *
  * 1. Bootstraps session statuses for all projects on mount
  * 2. Subscribes to SSE for real-time status updates
+ * 3. Merges live sessions from store with initial server data
  */
 export function ProjectsList({ initialProjects }: ProjectsListProps) {
-	// Manage session statuses across all projects
-	const { sessionStatuses, lastActivity } = useSessionStatuses(initialProjects)
+	// Get directories for multi-directory hooks
+	const directories = useMemo(
+		() => initialProjects.map((p) => p.project.worktree),
+		[initialProjects],
+	)
 
-	// SSE events are handled by OpencodeProvider via useMultiServerSSE
+	// Prepare initial sessions for bootstrap (format for useMultiDirectoryStatus)
+	const initialSessionsForBootstrap = useMemo(() => {
+		const result: Record<string, Array<{ id: string; formattedTime: string }>> = {}
+		for (const { project, sessions } of initialProjects) {
+			result[project.worktree] = sessions.map((s) => ({
+				id: s.id,
+				formattedTime: s.formattedTime,
+			}))
+		}
+		return result
+	}, [initialProjects])
+
+	// CRITICAL: Subscribe to SSE events and route to store
+	// Without this, multiServerSSE emits events but they never reach the Zustand store
+	useSSEEvents()
+
+	// Use new multi-directory hooks
+	const liveSessions = useMultiDirectorySessions(directories)
+	const { sessionStatuses, lastActivity } = useMultiDirectoryStatus(
+		directories,
+		initialSessionsForBootstrap,
+	)
 
 	if (initialProjects.length === 0) {
 		return (
@@ -442,40 +318,56 @@ export function ProjectsList({ initialProjects }: ProjectsListProps) {
 	return (
 		<div className="space-y-8">
 			<SSEStatus />
-			{initialProjects.map(({ project, sessions, name }) => (
-				<div key={project.id} className="space-y-2">
-					{/* Project Header */}
-					<div className="flex items-center gap-3 mb-3">
-						<h2 className="text-lg font-semibold text-foreground">{name}</h2>
-						<span className="text-xs text-muted-foreground">
-							{sessions.length} session
-							{sessions.length !== 1 ? "s" : ""}
-						</span>
-						<div className="ml-auto">
-							<NewSessionButton directory={project.worktree} />
+			{initialProjects.map(({ project, sessions, name }) => {
+				// Merge live sessions from store with initial sessions
+				// Use live sessions if available, otherwise fall back to initial
+				const displaySessions = liveSessions[project.worktree] ?? sessions
+
+				// Deduplicate by session ID (prefer live sessions over initial)
+				const sessionMap = new Map<string, SessionDisplay>()
+				for (const session of sessions) {
+					sessionMap.set(session.id, session)
+				}
+				for (const session of displaySessions) {
+					sessionMap.set(session.id, session)
+				}
+				const mergedSessions = Array.from(sessionMap.values())
+
+				return (
+					<div key={project.id} className="space-y-2">
+						{/* Project Header */}
+						<div className="flex items-center gap-3 mb-3">
+							<h2 className="text-lg font-semibold text-foreground">{name}</h2>
+							<span className="text-xs text-muted-foreground">
+								{mergedSessions.length} session
+								{mergedSessions.length !== 1 ? "s" : ""}
+							</span>
+							<div className="ml-auto">
+								<NewSessionButton directory={project.worktree} />
+							</div>
 						</div>
+
+						{/* Sessions List (show top 5) - animated reordering */}
+						<ul className="space-y-1">
+							<AnimatePresence mode="popLayout">
+								<SortedSessionsList
+									sessions={mergedSessions.slice(0, 5)}
+									directory={project.worktree}
+									sessionStatuses={sessionStatuses}
+									lastActivity={lastActivity}
+								/>
+							</AnimatePresence>
+						</ul>
+
+						{/* Show more link if there are more sessions */}
+						{mergedSessions.length > 5 && (
+							<div className="text-sm text-muted-foreground pl-3">
+								+{mergedSessions.length - 5} more sessions
+							</div>
+						)}
 					</div>
-
-					{/* Sessions List (show top 5) - animated reordering */}
-					<ul className="space-y-1">
-						<AnimatePresence mode="popLayout">
-							<SortedSessionsList
-								sessions={sessions.slice(0, 5)}
-								directory={project.worktree}
-								sessionStatuses={sessionStatuses}
-								lastActivity={lastActivity}
-							/>
-						</AnimatePresence>
-					</ul>
-
-					{/* Show more link if there are more sessions */}
-					{sessions.length > 5 && (
-						<div className="text-sm text-muted-foreground pl-3">
-							+{sessions.length - 5} more sessions
-						</div>
-					)}
-				</div>
-			))}
+				)
+			})}
 		</div>
 	)
 }

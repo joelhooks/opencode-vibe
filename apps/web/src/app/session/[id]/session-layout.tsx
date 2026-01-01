@@ -5,7 +5,13 @@ import Link from "next/link"
 import type { UIMessage } from "ai"
 import { toast } from "sonner"
 import { OpencodeSSRPlugin } from "@opencode-vibe/react"
-import { useSession, useMessages, useSessionStatus, useSendMessage, useSSESync } from "@/app/hooks"
+import {
+	useSession,
+	useMessages,
+	useSessionStatus,
+	useSendMessage,
+	useSSEEvents,
+} from "@/app/hooks"
 import { NewSessionButton } from "./new-session-button"
 import { SessionMessages } from "./session-messages"
 import { PromptInput } from "@/components/prompt"
@@ -109,7 +115,7 @@ function SessionContent({
 	const toggleDebugPanel = () => setDebugPanelOpen((prev) => !prev)
 
 	// Start SSE and wire events to store - CRITICAL for real-time updates
-	useSSESync()
+	useSSEEvents()
 
 	// Use individual factory hooks
 	const sessionData = useSession(sessionId)

@@ -21,7 +21,8 @@ export const {
 	useCreateSession,
 	useFileSearch,
 	useSSE,
-	useSSESync,
+	useSSEEvents,
+	useSSESync, // deprecated - use useSSEEvents
 	useConnectionStatus,
 	useSessionStatus,
 	useCompactionState,

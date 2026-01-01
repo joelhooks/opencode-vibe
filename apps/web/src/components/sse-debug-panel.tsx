@@ -9,6 +9,7 @@
 
 import { useState, useEffect } from "react"
 import { multiServerSSE } from "@opencode-vibe/core/sse"
+import { useSSEState } from "@opencode-vibe/react"
 import { X, RefreshCw, Server, Circle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -30,24 +31,21 @@ interface ServerInfo {
 }
 
 export function SSEDebugPanel({ onClose }: { onClose: () => void }) {
-	const [servers, setServers] = useState<ServerInfo[]>([])
+	// Use reactive hook instead of polling - eliminates 1s setInterval
+	const sseState = useSSEState()
 	const [recentEvents, setRecentEvents] = useState<SSEEvent[]>([])
-	const [discovering, setDiscovering] = useState(true)
 
-	// Poll for server status updates
-	useEffect(() => {
-		const updateStatus = () => {
-			// Use new getDiscoveredServers method that includes directory info
-			const discoveredServers = multiServerSSE.getDiscoveredServers()
-			setServers(discoveredServers)
-			setDiscovering(!multiServerSSE.isDiscoveryComplete())
+	// Derive ServerInfo from SSEState (join servers + connections)
+	const servers: ServerInfo[] = sseState.servers.map((server) => {
+		const connection = sseState.connections.find(([port]) => port === server.port)
+		return {
+			port: server.port,
+			directory: server.directory,
+			state: connection?.[1].state ?? "disconnected",
+			lastEventTime: connection?.[1].lastEventTime,
 		}
-
-		updateStatus()
-		const interval = setInterval(updateStatus, 1000)
-
-		return () => clearInterval(interval)
-	}, [])
+	})
+	const discovering = sseState.discovering
 
 	// Subscribe to SSE events
 	useEffect(() => {
