@@ -9,7 +9,7 @@
 
 import { Atom } from "@effect-atom/atom"
 import * as Registry from "@effect-atom/atom/Registry"
-import { Effect, Metric } from "effect"
+import { Effect, Metric, Context, Layer } from "effect"
 import type { Message, Part, Session } from "../types/domain.js"
 import type { SessionStatus } from "../types/events.js"
 import type { EnrichedMessage, EnrichedSession, WorldState } from "./types.js"
@@ -363,6 +363,139 @@ export class WorldStore {
 		return worldState
 	}
 }
+
+// ============================================================================
+// WorldStoreService - Effect.Service wrapper
+// ============================================================================
+
+/**
+ * WorldStoreService interface - Effect.Service wrapper around WorldStore
+ *
+ * Provides scoped lifecycle management with Effect.Service pattern.
+ * The WorldStore instance is created on acquire and cleaned up on release.
+ */
+export interface WorldStoreServiceInterface {
+	/**
+	 * Subscribe to world state changes
+	 */
+	subscribe: (callback: WorldSubscriber) => Effect.Effect<() => void, never, never>
+
+	/**
+	 * Get current world state snapshot
+	 */
+	getState: () => Effect.Effect<WorldState, never, never>
+
+	/**
+	 * Update sessions
+	 */
+	setSessions: (sessions: Session[]) => Effect.Effect<void, never, never>
+
+	/**
+	 * Update messages
+	 */
+	setMessages: (messages: Message[]) => Effect.Effect<void, never, never>
+
+	/**
+	 * Update parts
+	 */
+	setParts: (parts: Part[]) => Effect.Effect<void, never, never>
+
+	/**
+	 * Update session status (bulk)
+	 */
+	setStatus: (status: Record<string, SessionStatus>) => Effect.Effect<void, never, never>
+
+	/**
+	 * Update single session status
+	 */
+	updateStatus: (sessionId: string, status: SessionStatus) => Effect.Effect<void, never, never>
+
+	/**
+	 * Upsert session by ID
+	 */
+	upsertSession: (session: Session) => Effect.Effect<void, never, never>
+
+	/**
+	 * Upsert message by ID
+	 */
+	upsertMessage: (message: Message) => Effect.Effect<void, never, never>
+
+	/**
+	 * Upsert part by ID
+	 */
+	upsertPart: (part: Part) => Effect.Effect<void, never, never>
+
+	/**
+	 * Get sessionID for a message by messageID
+	 */
+	getMessageSessionId: (messageId: string) => Effect.Effect<string | undefined, never, never>
+
+	/**
+	 * Update connection status
+	 */
+	setConnectionStatus: (
+		status: "connecting" | "connected" | "disconnected" | "error",
+	) => Effect.Effect<void, never, never>
+}
+
+/**
+ * WorldStoreService tag for dependency injection
+ */
+export class WorldStoreService extends Context.Tag("WorldStoreService")<
+	WorldStoreService,
+	WorldStoreServiceInterface
+>() {}
+
+/**
+ * WorldStoreService Layer with scoped lifecycle
+ *
+ * Pattern from cursor-store.ts: Layer.scoped wraps WorldStore class,
+ * providing Effect-native lifecycle management.
+ *
+ * @example
+ * ```typescript
+ * const program = Effect.gen(function* () {
+ *   const store = yield* WorldStoreService
+ *   yield* store.setSessions([...])
+ *   const state = yield* store.getState()
+ *   // Auto-cleanup when scope exits
+ * })
+ *
+ * Effect.runPromise(
+ *   program.pipe(Effect.provide(WorldStoreServiceLive))
+ * )
+ * ```
+ */
+export const WorldStoreServiceLive: Layer.Layer<WorldStoreService, never, never> = Layer.scoped(
+	WorldStoreService,
+	Effect.acquireRelease(
+		// Acquire: Create WorldStore instance
+		Effect.sync(() => {
+			const store = new WorldStore()
+
+			return {
+				subscribe: (callback: WorldSubscriber) => Effect.sync(() => store.subscribe(callback)),
+				getState: () => Effect.sync(() => store.getState()),
+				setSessions: (sessions: Session[]) => Effect.sync(() => store.setSessions(sessions)),
+				setMessages: (messages: Message[]) => Effect.sync(() => store.setMessages(messages)),
+				setParts: (parts: Part[]) => Effect.sync(() => store.setParts(parts)),
+				setStatus: (status: Record<string, SessionStatus>) =>
+					Effect.sync(() => store.setStatus(status)),
+				updateStatus: (sessionId: string, status: SessionStatus) =>
+					Effect.sync(() => store.updateStatus(sessionId, status)),
+				upsertSession: (session: Session) => Effect.sync(() => store.upsertSession(session)),
+				upsertMessage: (message: Message) => Effect.sync(() => store.upsertMessage(message)),
+				upsertPart: (part: Part) => Effect.sync(() => store.upsertPart(part)),
+				getMessageSessionId: (messageId: string) =>
+					Effect.sync(() => store.getMessageSessionId(messageId)),
+				setConnectionStatus: (status: "connecting" | "connected" | "disconnected" | "error") =>
+					Effect.sync(() => store.setConnectionStatus(status)),
+			}
+		}),
+		// Release: Cleanup (WorldStore has no explicit cleanup currently)
+		() => Effect.void,
+	),
+)
 
 /**
  * effect-atom based state atoms

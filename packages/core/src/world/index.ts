@@ -22,7 +22,8 @@ export { WorldSSE, createWorldSSE, connectToSSE, SSEService, SSEServiceLive } fr
 export type { SSEEvent, WorldSSEConfig, SSEServiceInterface } from "./sse.js"
 
 // WorldStore (atom-based state management)
-export { WorldStore } from "./atoms.js"
+export { WorldStore, WorldStoreService, WorldStoreServiceLive } from "./atoms.js"
+export type { WorldStoreServiceInterface } from "./atoms.js"
 
 // Enriched types
 export type { EnrichedMessage, EnrichedSession } from "./types.js"
@@ -63,3 +64,7 @@ export type { EventSource, SourceEvent } from "./event-source.js"
 // Merged stream (combines multiple event sources)
 export { createMergedWorldStream } from "./merged-stream.js"
 export type { MergedStreamConfig, MergedStreamHandle } from "./merged-stream.js"
+
+// Metrics endpoint (Prometheus exposition format)
+export { formatPrometheusMetrics } from "./metrics-endpoint.js"
+export type { MetricSnapshot } from "./metrics-endpoint.js"
