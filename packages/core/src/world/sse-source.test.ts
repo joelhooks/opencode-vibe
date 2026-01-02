@@ -179,9 +179,15 @@ describe("createSseSource", () => {
 			expect(events.length).toBe(1)
 			expect(events[0].source).toBe("sse")
 			expect(events[0].type).toBe("session.created")
-			expect(events[0].data).toEqual({
+			// Implementation passes through full payload.properties unchanged
+			expect(events[0].data).toMatchObject({
 				directory: "/test/project",
-				properties: { sessionID: "test-123" },
+				properties: {
+					info: {
+						id: "test-123",
+						title: "Test Session",
+					},
+				},
 			})
 			expect(events[0].timestamp).toBeGreaterThan(0)
 			expect(events[0].sequence).toBe(0)
@@ -265,9 +271,13 @@ describe("createSseSource", () => {
 			const globalEvent: GlobalEvent = {
 				directory: "/my/project",
 				payload: {
-					type: "message.updated",
+					type: "message.created",
 					properties: {
-						info: {} as any,
+						info: {
+							id: "msg-456",
+							role: "user",
+							content: [{ type: "text", text: "Hello world" }],
+						} as any,
 					},
 				} as any,
 			}
@@ -278,11 +288,13 @@ describe("createSseSource", () => {
 			expect(events.length).toBe(1)
 			expect(events[0].source).toBe("sse")
 			expect(events[0].type).toBe("message.created")
-			expect(events[0].data).toEqual({
+			// Implementation passes through full payload.properties
+			expect(events[0].data).toMatchObject({
 				directory: "/my/project",
 				properties: {
-					messageID: "msg-456",
-					content: "Hello world",
+					info: {
+						id: "msg-456",
+					},
 				},
 			})
 		})

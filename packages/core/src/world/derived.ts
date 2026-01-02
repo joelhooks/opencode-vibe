@@ -11,24 +11,65 @@ import { Atom } from "@effect-atom/atom"
 import type { Message, Part, Session } from "../types/domain.js"
 import type { SessionStatus } from "../types/events.js"
 import type { EnrichedMessage, EnrichedSession, WorldState } from "./types.js"
+import {
+	sessionsAtom as sessionsMapAtom,
+	messagesAtom as messagesMapAtom,
+	partsAtom as partsMapAtom,
+	statusAtom as statusMapAtom,
+	connectionStatusAtom,
+} from "./atoms.js"
 
 /**
- * Array-based atoms for enrichment logic
+ * Array/Record-based derived atoms for enrichment logic
  *
- * These use arrays for simpler iteration during enrichment.
- * The Map-based atoms in atoms.ts are for O(1) SSE updates.
- *
- * TODO: Reconcile these two approaches - either:
- * 1. Convert Map atoms to arrays in worldAtom derivation
- * 2. Use a single atom design throughout
+ * These convert Map-based atoms from atoms.ts to arrays/records for simpler iteration.
+ * The Map-based atoms in atoms.ts are canonical (single source of truth) and optimized for O(1) SSE updates.
+ * These derived atoms provide array/record views for the enrichment layer.
  */
-export const sessionsAtom = Atom.make<Session[]>([])
-export const messagesAtom = Atom.make<Message[]>([])
-export const partsAtom = Atom.make<Part[]>([])
-export const statusAtom = Atom.make<Record<string, SessionStatus>>({})
-export const connectionStatusAtom = Atom.make<
-	"connecting" | "connected" | "disconnected" | "error"
->("disconnected")
+
+/**
+ * Sessions as array (derived from Map)
+ */
+export const sessionsAtom = Atom.make((get) => Array.from(get(sessionsMapAtom).values()))
+
+/**
+ * Messages as array (derived from Map, flattened from Map<sessionID, Message[]>)
+ */
+export const messagesAtom = Atom.make((get) => {
+	const messagesMap = get(messagesMapAtom)
+	const allMessages: Message[] = []
+	for (const sessionMessages of messagesMap.values()) {
+		allMessages.push(...sessionMessages)
+	}
+	return allMessages
+})
+
+/**
+ * Parts as array (derived from Map, flattened from Map<messageID, Part[]>)
+ */
+export const partsAtom = Atom.make((get) => {
+	const partsMap = get(partsMapAtom)
+	const allParts: Part[] = []
+	for (const messageParts of partsMap.values()) {
+		allParts.push(...messageParts)
+	}
+	return allParts
+})
+
+/**
+ * Status as record (derived from Map)
+ */
+export const statusAtom = Atom.make((get) => {
+	const statusMap = get(statusMapAtom)
+	const record: Record<string, SessionStatus> = {}
+	for (const [sessionId, status] of statusMap.entries()) {
+		record[sessionId] = status
+	}
+	return record
+})
+
+// Re-export connectionStatusAtom directly (it's already a primitive atom)
+export { connectionStatusAtom }
 
 /**
  * Derived world atom with enrichment logic

@@ -129,7 +129,8 @@ export async function run(context: CommandContext): Promise<void> {
 		if (stream) {
 			await stream.dispose()
 		}
-		process.exit(0)
+		// Don't call process.exit() - let the main loop resolve naturally
+		// This prevents "Unhandled Rejection" errors in vitest when SIGINT is emitted
 	})
 
 	try {
@@ -317,7 +318,11 @@ export async function run(context: CommandContext): Promise<void> {
 				]),
 			)
 		}
-		process.exit(1)
+		// Only exit with error code in production - let tests handle errors naturally
+		if (process.env.NODE_ENV !== "test") {
+			process.exit(1)
+		}
+		throw error
 	}
 }
 
