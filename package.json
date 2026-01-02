@@ -28,7 +28,7 @@
 		"@libsql/darwin-arm64": "^0.5.22",
 		"@types/bun": "latest",
 		"@types/jsdom": "^27.0.0",
-		"@typescript/native-preview": "^7.0.0-dev.20251230.1",
+		"@typescript/native-preview": "^7.0.0-dev.20260101.1",
 		"@vitest/coverage-v8": "^4.0.16",
 		"happy-dom": "^20.0.11",
 		"jsdom": "^27.4.0",
@@ -43,6 +43,6 @@
 	"dependencies": {
 		"fuzzysort": "^3.1.0",
 		"next-themes": "^0.4.6",
-		"zod": "^4.2.1"
+		"zod": "^4.3.4"
 	}
 }
