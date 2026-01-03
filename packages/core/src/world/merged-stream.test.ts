@@ -9,6 +9,36 @@ import { describe, it, expect } from "vitest"
 import { Effect, Stream } from "effect"
 import { createMergedWorldStream } from "./merged-stream.js"
 import type { EventSource, SourceEvent } from "./event-source.js"
+import { Registry, connectionStatusAtom } from "./atoms.js"
+import type { WorldSSE } from "./sse.js"
+
+/**
+ * Create a test SSE instance with controllable lifecycle
+ */
+function createTestSSE(registry: ReturnType<typeof Registry.make>) {
+	let started = false
+	let stopped = false
+
+	return {
+		start() {
+			started = true
+			// Simulate proper SSE lifecycle: connecting → connected
+			registry.set(connectionStatusAtom, "connecting")
+			// Transition to connected synchronously for test simplicity
+			registry.set(connectionStatusAtom, "connected")
+		},
+		stop() {
+			stopped = true
+			registry.set(connectionStatusAtom, "disconnected")
+		},
+		getConnectedPorts() {
+			return []
+		},
+		// Test helpers
+		isStarted: () => started,
+		isStopped: () => stopped,
+	} as unknown as WorldSSE
+}
 
 /**
  * Create a mock EventSource that emits test events
@@ -34,6 +64,9 @@ function createMockSource(
 describe("createMergedWorldStream", () => {
 	describe("basic merging", () => {
 		it("merges events from multiple sources", async () => {
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
 			const source1 = createMockSource("source1", [
 				{ type: "test1", data: "a", timestamp: 100 },
 				{ type: "test1", data: "b", timestamp: 200 },
@@ -45,6 +78,8 @@ describe("createMergedWorldStream", () => {
 			])
 
 			const stream = createMergedWorldStream({
+				registry,
+				sse,
 				sources: [source1, source2],
 			})
 
@@ -81,7 +116,12 @@ describe("createMergedWorldStream", () => {
 		})
 
 		it("handles empty sources array", async () => {
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
 			const stream = createMergedWorldStream({
+				registry,
+				sse,
 				sources: [],
 			})
 
@@ -96,7 +136,10 @@ describe("createMergedWorldStream", () => {
 
 		it("handles undefined sources (no additional sources)", async () => {
 			// Should work with just SSE (no additional sources)
-			const stream = createMergedWorldStream({})
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
+			const stream = createMergedWorldStream({ registry, sse })
 
 			// This test just verifies it doesn't crash
 			// Actual SSE connection is tested in stream.test.ts
@@ -109,6 +152,9 @@ describe("createMergedWorldStream", () => {
 
 	describe("source availability filtering", () => {
 		it("excludes unavailable sources", async () => {
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
 			const availableSource = createMockSource(
 				"available",
 				[{ type: "test", data: "ok", timestamp: 100 }],
@@ -122,6 +168,8 @@ describe("createMergedWorldStream", () => {
 			)
 
 			const stream = createMergedWorldStream({
+				registry,
+				sse,
 				sources: [availableSource, unavailableSource],
 			})
 
@@ -138,6 +186,9 @@ describe("createMergedWorldStream", () => {
 		})
 
 		it("handles all sources unavailable gracefully", async () => {
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
 			const source1 = createMockSource(
 				"source1",
 				[{ type: "test", data: "x", timestamp: 100 }],
@@ -150,6 +201,8 @@ describe("createMergedWorldStream", () => {
 			)
 
 			const stream = createMergedWorldStream({
+				registry,
+				sse,
 				sources: [source1, source2],
 			})
 
@@ -164,6 +217,9 @@ describe("createMergedWorldStream", () => {
 		})
 
 		it("includes only available sources in mixed scenario", async () => {
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
 			const sources = [
 				createMockSource("available1", [{ type: "a", data: 1, timestamp: 100 }], true),
 				createMockSource("unavailable1", [{ type: "b", data: 2, timestamp: 200 }], false),
@@ -171,7 +227,7 @@ describe("createMergedWorldStream", () => {
 				createMockSource("unavailable2", [{ type: "d", data: 4, timestamp: 400 }], false),
 			]
 
-			const stream = createMergedWorldStream({ sources })
+			const stream = createMergedWorldStream({ registry, sse, sources })
 
 			const events = await Effect.runPromise(
 				Stream.runCollect(stream.stream()).pipe(Effect.map((chunk) => Array.from(chunk))),
@@ -186,13 +242,16 @@ describe("createMergedWorldStream", () => {
 
 	describe("event ordering", () => {
 		it("preserves sequence numbers from sources", async () => {
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
 			const source = createMockSource("sequenced", [
 				{ type: "event", data: "first", timestamp: 100, sequence: 1 },
 				{ type: "event", data: "second", timestamp: 200, sequence: 2 },
 				{ type: "event", data: "third", timestamp: 300, sequence: 3 },
 			])
 
-			const stream = createMergedWorldStream({ sources: [source] })
+			const stream = createMergedWorldStream({ registry, sse, sources: [source] })
 
 			const events = await Effect.runPromise(
 				Stream.runCollect(stream.stream()).pipe(Effect.map((chunk) => Array.from(chunk))),
@@ -206,6 +265,9 @@ describe("createMergedWorldStream", () => {
 		})
 
 		it("handles mixed sequenced and non-sequenced events", async () => {
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
 			const sequenced = createMockSource("sequenced", [
 				{ type: "s1", data: "seq", timestamp: 100, sequence: 10 },
 			])
@@ -215,6 +277,8 @@ describe("createMergedWorldStream", () => {
 			])
 
 			const stream = createMergedWorldStream({
+				registry,
+				sse,
 				sources: [sequenced, nonSequenced],
 			})
 
@@ -236,6 +300,9 @@ describe("createMergedWorldStream", () => {
 
 	describe("error handling", () => {
 		it("propagates errors from source streams", async () => {
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
 			const errorSource: EventSource = {
 				name: "error-source",
 				available: () => Effect.succeed(true),
@@ -243,6 +310,8 @@ describe("createMergedWorldStream", () => {
 			}
 
 			const stream = createMergedWorldStream({
+				registry,
+				sse,
 				sources: [errorSource],
 			})
 
@@ -255,6 +324,9 @@ describe("createMergedWorldStream", () => {
 		})
 
 		it("handles availability check errors gracefully", async () => {
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
 			const failingAvailabilitySource: EventSource = {
 				name: "failing-check",
 				available: () =>
@@ -270,6 +342,8 @@ describe("createMergedWorldStream", () => {
 			const goodSource = createMockSource("good", [{ type: "test", data: "ok", timestamp: 200 }])
 
 			const stream = createMergedWorldStream({
+				registry,
+				sse,
 				sources: [failingAvailabilitySource, goodSource],
 			})
 
@@ -288,6 +362,9 @@ describe("createMergedWorldStream", () => {
 
 	describe("event consumer (route to WorldStore)", () => {
 		it("routes session.created events to store", async () => {
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
 			const now = Date.now()
 			const source = createMockSource("test-source", [
 				{
@@ -302,22 +379,10 @@ describe("createMergedWorldStream", () => {
 				},
 			])
 
-			const stream = createMergedWorldStream({ sources: [source] })
+			const stream = createMergedWorldStream({ registry, sse, sources: [source] })
 
-			// Wait for session to appear in store via subscription
-			await new Promise<void>((resolve) => {
-				const unsubscribe = stream.subscribe((state) => {
-					if (state.sessions.find((s) => s.id === "sess-001")) {
-						unsubscribe()
-						resolve()
-					}
-				})
-				// Fallback timeout
-				setTimeout(() => {
-					unsubscribe()
-					resolve()
-				}, 1000)
-			})
+			// Background consumer processes events asynchronously - wait for it
+			await new Promise((resolve) => setTimeout(resolve, 50))
 
 			const state = await stream.getSnapshot()
 			const session = state.sessions.find((s) => s.id === "sess-001")
@@ -328,6 +393,9 @@ describe("createMergedWorldStream", () => {
 		})
 
 		it("routes session.updated events to store", async () => {
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
 			const now = Date.now()
 			const source = createMockSource("test-source", [
 				{
@@ -352,7 +420,7 @@ describe("createMergedWorldStream", () => {
 				},
 			])
 
-			const stream = createMergedWorldStream({ sources: [source] })
+			const stream = createMergedWorldStream({ registry, sse, sources: [source] })
 
 			// Wait for updated session to appear
 			await new Promise<void>((resolve) => {
@@ -378,6 +446,9 @@ describe("createMergedWorldStream", () => {
 		})
 
 		it("handles unknown event types gracefully", async () => {
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
 			const now = Date.now()
 			const source = createMockSource("test-source", [
 				{
@@ -397,7 +468,7 @@ describe("createMergedWorldStream", () => {
 				},
 			])
 
-			const stream = createMergedWorldStream({ sources: [source] })
+			const stream = createMergedWorldStream({ registry, sse, sources: [source] })
 
 			// Wait for session to appear
 			await new Promise<void>((resolve) => {
@@ -422,6 +493,9 @@ describe("createMergedWorldStream", () => {
 		})
 
 		it("handles malformed event data gracefully", async () => {
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
 			const now = Date.now()
 			const source = createMockSource("test-source", [
 				{
@@ -441,7 +515,7 @@ describe("createMergedWorldStream", () => {
 				},
 			])
 
-			const stream = createMergedWorldStream({ sources: [source] })
+			const stream = createMergedWorldStream({ registry, sse, sources: [source] })
 
 			// Wait for valid session to appear
 			await new Promise<void>((resolve) => {
@@ -466,6 +540,9 @@ describe("createMergedWorldStream", () => {
 		})
 
 		it("processes events from multiple sources concurrently", async () => {
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
 			const now = Date.now()
 			const source1 = createMockSource("source1", [
 				{
@@ -494,6 +571,8 @@ describe("createMergedWorldStream", () => {
 			])
 
 			const stream = createMergedWorldStream({
+				registry,
+				sse,
 				sources: [source1, source2],
 			})
 
@@ -533,11 +612,16 @@ describe("createMergedWorldStream", () => {
 			// 2. Bootstrap fails silently
 			// 3. Subscribe callback throttling prevents updates from showing
 
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
 			const states: string[] = []
 			const sessionCounts: number[] = []
 
 			// Simulate watch.ts behavior
 			const stream = createMergedWorldStream({
+				registry,
+				sse,
 				// No baseUrl - triggers discovery like watch command
 			})
 
@@ -573,8 +657,11 @@ describe("createMergedWorldStream", () => {
 			// Expected behavior: subscribe() fires IMMEDIATELY with current state,
 			// then on each change (like React useState pattern)
 
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
 			let callbackCount = 0
-			const stream = createMergedWorldStream({})
+			const stream = createMergedWorldStream({ registry, sse })
 
 			stream.subscribe(() => {
 				callbackCount++
@@ -593,6 +680,9 @@ describe("createMergedWorldStream", () => {
 
 	describe("async iterator lifecycle", () => {
 		it("yields current state immediately on start", async () => {
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
 			const now = Date.now()
 			const source = createMockSource("test-source", [
 				{
@@ -607,7 +697,7 @@ describe("createMergedWorldStream", () => {
 				},
 			])
 
-			const stream = createMergedWorldStream({ sources: [source] })
+			const stream = createMergedWorldStream({ registry, sse, sources: [source] })
 
 			// Wait for session to land in store
 			await new Promise<void>((resolve) => {
@@ -637,6 +727,9 @@ describe("createMergedWorldStream", () => {
 		})
 
 		it("yields subsequent states on changes", async () => {
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
 			const now = Date.now()
 			const source = createMockSource("test-source", [
 				{
@@ -651,7 +744,7 @@ describe("createMergedWorldStream", () => {
 				},
 			])
 
-			const stream = createMergedWorldStream({ sources: [source] })
+			const stream = createMergedWorldStream({ registry, sse, sources: [source] })
 
 			// Start async iteration
 			const iterator = stream[Symbol.asyncIterator]()
@@ -693,7 +786,10 @@ describe("createMergedWorldStream", () => {
 		})
 
 		it("cleans up subscription when iterator breaks", async () => {
-			const stream = createMergedWorldStream({})
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
+			const stream = createMergedWorldStream({ registry, sse })
 
 			// Start iteration then break immediately
 			const iterator = stream[Symbol.asyncIterator]()
@@ -707,6 +803,9 @@ describe("createMergedWorldStream", () => {
 		})
 
 		it("handles rapid iteration without dropping states", async () => {
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
 			const now = Date.now()
 			const source = createMockSource("test-source", [
 				{
@@ -741,7 +840,7 @@ describe("createMergedWorldStream", () => {
 				},
 			])
 
-			const stream = createMergedWorldStream({ sources: [source] })
+			const stream = createMergedWorldStream({ registry, sse, sources: [source] })
 
 			// Collect states via async iteration
 			const states = []

@@ -23,7 +23,16 @@ import {
 import type { Instance } from "./types.js"
 
 // Re-export base atoms for consumers that need them
-export { sessionsAtom, messagesAtom, partsAtom, statusAtom, connectionStatusAtom }
+export {
+	sessionsAtom,
+	messagesAtom,
+	partsAtom,
+	statusAtom,
+	connectionStatusAtom,
+	instancesAtom,
+	projectsAtom,
+	sessionToInstancePortAtom,
+}
 
 /**
  * Derived world atom with enrichment logic

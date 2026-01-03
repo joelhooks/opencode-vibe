@@ -258,8 +258,15 @@ export function createMergedWorldStream(config: MergedStreamConfig = {}): Merged
 
 	/**
 	 * Subscribe to world state changes
+	 *
+	 * Pattern: BehaviorSubject-like - fires immediately with current state,
+	 * then on each change (like React useState).
 	 */
 	function subscribe(callback: (state: WorldState) => void): () => void {
+		// Fire immediately with current state (Registry.subscribe doesn't do this)
+		callback(registry.get(worldStateAtom))
+
+		// Then subscribe to future changes
 		return registry.subscribe(worldStateAtom, callback)
 	}
 
