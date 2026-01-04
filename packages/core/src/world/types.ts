@@ -6,8 +6,49 @@
  */
 
 import type { Message, Part, Session } from "../types/domain.js"
-import type { Project } from "../types/sdk.js"
-import type { SessionStatus } from "../types/events.js"
+import type { Project, SessionStatus } from "../types/sdk.js"
+import type { SessionStatus as SessionStatusCompat } from "../types/events.js"
+
+/**
+ * Context usage metrics for a session
+ */
+export interface ContextUsage {
+	/** Number of tokens used */
+	used: number
+	/** Maximum token limit */
+	limit: number
+	/** Usage percentage (0-100) */
+	percentage: number
+	/** True if approaching or at limit */
+	isNearLimit: boolean
+	/** Detailed token breakdown */
+	tokens: {
+		/** Input tokens consumed */
+		input: number
+		/** Output tokens generated */
+		output: number
+		/** Cached tokens reused */
+		cached: number
+	}
+	/** Timestamp of last update */
+	lastUpdated: number
+}
+
+/**
+ * Compaction state for a session
+ */
+export interface CompactionState {
+	/** True if compaction is in progress */
+	isCompacting: boolean
+	/** True if triggered automatically */
+	isAutomatic: boolean
+	/** Compaction progress (0-100) */
+	progress?: number
+	/** Timestamp when compaction started */
+	startedAt?: number
+	/** Message ID triggering compaction */
+	messageId?: string
+}
 
 /**
  * Instance represents a running OpenCode server process.
@@ -35,12 +76,16 @@ export interface Instance {
  * Enriched session with status, messages, and computed properties
  */
 export interface EnrichedSession extends Session {
-	status: SessionStatus
+	status: SessionStatusCompat // Backward-compat string version
 	isActive: boolean
 	messages: EnrichedMessage[]
 	unreadCount: number
 	contextUsagePercent: number
 	lastActivityAt: number
+	/** Detailed context usage metrics (optional - may not be computed yet) */
+	contextUsage?: ContextUsage
+	/** Compaction state (optional - may not be compacting) */
+	compactionState?: CompactionState
 }
 
 /**
@@ -101,6 +146,14 @@ export interface WorldState {
 	 * Pre-computed to avoid adapter pattern in consumers
 	 */
 	byDirectory: Map<string, EnrichedSession[]>
+
+	/**
+	 * Session status map from SSE events
+	 * Maps sessionID to SessionStatus (currently string, will migrate to object type)
+	 * TODO: Migrate to SDK SessionStatus object { type: "idle" | "busy" | "retry" }
+	 * Optional for backward compat during migration
+	 */
+	statuses?: Map<string, SessionStatusCompat>
 
 	/**
 	 * Pre-computed statistics
