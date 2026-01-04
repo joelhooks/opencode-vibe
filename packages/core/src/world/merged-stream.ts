@@ -201,6 +201,11 @@ export function createMergedWorldStream(config: MergedStreamConfig = {}): Merged
 	// Use injected registry (for testing) or create a new one
 	const registry = injectedRegistry || Registry.make()
 
+	// CRITICAL: Mount worldStateAtom to keep it reactive
+	// From Hivemind mem-f081811ec795ff2a: "Use r.mount() which keeps atoms alive while mounted"
+	// Without mount, Registry.subscribe won't fire when dependent atoms (statusAtom, etc.) change
+	const cleanupMount = registry.mount(worldStateAtom)
+
 	// Use injected SSE instance (for testing) or create a new one
 	const sse =
 		injectedSSE ||
@@ -359,6 +364,7 @@ export function createMergedWorldStream(config: MergedStreamConfig = {}): Merged
 	 */
 	async function dispose(): Promise<void> {
 		sse?.stop()
+		cleanupMount() // Unmount worldStateAtom
 	}
 
 	// Start event consumer for additional sources (swarm-db, etc.)

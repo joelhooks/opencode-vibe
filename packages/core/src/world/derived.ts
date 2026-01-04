@@ -216,4 +216,4 @@ export const worldAtom = Atom.make((get) => {
 	}
 
 	return worldState
-})
+}).pipe(Atom.keepAlive)
