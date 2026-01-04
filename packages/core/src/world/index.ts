@@ -13,8 +13,7 @@ export { createWorldStream } from "./stream.js"
 export type { WorldState, WorldStreamConfig, WorldStreamHandle } from "./stream.js"
 export type { SSEEventInfo } from "./types.js"
 
-// Discovery (for CLI tools that need direct access)
-export { discoverServers } from "../discovery/server-discovery.js"
+// Discovery types only - for Node.js discovery, import from "@opencode-vibe/core/discovery/server"
 export type { DiscoveredServer } from "../discovery/server-discovery.js"
 
 // SSE internals (for advanced usage)
@@ -72,3 +71,6 @@ export type { OTelConfig } from "./otel.js"
 
 // Routing utilities (pure functions for instance routing)
 export { getInstanceForSession, getInstanceForProject, getRouteUrl } from "./routing.js"
+
+// Event router (pure function for routing SSE events to atoms)
+export { routeEvent } from "./event-router.js"

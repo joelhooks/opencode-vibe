@@ -1,10 +1,11 @@
 /**
- * useMessagesWithParts - Uses Core API to fetch messages with parts
+ * useMessagesWithParts - Internal hook with World Stream delegation
  *
- * Fetches messages with parts pre-joined from Core layer via messages.listWithParts().
- * Transforms Core's MessageWithParts to React's OpencodeMessage format.
+ * Delegates to World Stream for messages with parts.
+ * World Stream already enriches messages with their parts via EnrichedMessage.
  *
- * This eliminates client-side joins - Core does the join at the data layer.
+ * This hook maintains the OpencodeMessage interface for backward compatibility
+ * while delegating to useWorldMessagesWithParts for the actual data.
  *
  * @example
  * ```tsx
@@ -29,8 +30,7 @@
 
 import { useMemo } from "react"
 import type { Message, Part } from "@opencode-vibe/core/types"
-import { useOpencodeStore } from "../../store"
-import { useOpencode } from "../../providers"
+import { useWorldMessagesWithParts } from "../use-world-messages-with-parts.js"
 
 export interface OpencodeMessage {
 	/** Message metadata */
@@ -39,35 +39,27 @@ export interface OpencodeMessage {
 	parts: Part[]
 }
 
-const EMPTY_MESSAGES: OpencodeMessage[] = []
-const EMPTY_PARTS: Part[] = []
-
 /**
- * Hook to get messages with their associated parts from store
+ * Hook to get messages with their associated parts
  *
- * MIGRATION NOTE (ADR-016 Phase 2.5):
- * This hook now uses store data populated by SSE events.
- * Core's messages.listWithParts() is used for initial fetch/bootstrap
- * but SSE events keep the store updated in real-time.
+ * MIGRATION NOTE (ADR-018 - Zustand Elimination):
+ * This hook now delegates to World Stream via useWorldMessagesWithParts.
+ * The OpencodeMessage interface is maintained for backward compatibility,
+ * but the data source is now World Stream (not Zustand).
  *
  * @param sessionId - Session ID to fetch messages for
  * @returns Array of messages with parts (empty array if none)
  */
 export function useMessagesWithParts(sessionId: string): OpencodeMessage[] {
-	const { directory } = useOpencode()
+	// Delegate to World Stream
+	const enrichedMessages = useWorldMessagesWithParts(sessionId)
 
-	// Select raw data from store - these are stable references from Immer
-	const messages = useOpencodeStore((state) => state.directories[directory]?.messages[sessionId])
-	const partsMap = useOpencodeStore((state) => state.directories[directory]?.parts)
-
-	// Derive the combined structure with useMemo to avoid infinite loops
-	// Only recomputes when messages or partsMap references change
+	// Transform EnrichedMessage to OpencodeMessage for backward compat
+	// EnrichedMessage already has parts, we just need to reshape the interface
 	return useMemo(() => {
-		if (!messages) return EMPTY_MESSAGES
-
-		return messages.map((message) => ({
-			info: message,
-			parts: partsMap?.[message.id] ?? EMPTY_PARTS,
+		return enrichedMessages.map((msg) => ({
+			info: msg, // EnrichedMessage extends Message, so this works
+			parts: msg.parts,
 		}))
-	}, [messages, partsMap])
+	}, [enrichedMessages])
 }

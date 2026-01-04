@@ -115,15 +115,16 @@ describe("SubagentView", () => {
 			"msg-2": [
 				{
 					id: "part-1",
+					sessionID: "sess-child-5",
 					messageID: "msg-2",
 					type: "text",
-					content: "Processing your request",
+					text: "Processing your request",
 				},
 				{
 					id: "part-2",
+					sessionID: "sess-child-5",
 					messageID: "msg-2",
 					type: "tool",
-					content: "",
 					tool: "read",
 					state: {
 						status: "completed",
@@ -166,9 +167,10 @@ describe("SubagentView", () => {
 			"msg-1": [
 				{
 					id: "part-1",
+					sessionID: "sess-child-6",
 					messageID: "msg-1",
 					type: "text",
-					content: "User message part - should not render",
+					text: "User message part - should not render",
 				},
 			],
 		}
@@ -284,9 +286,9 @@ describe("SubagentView", () => {
 
 			const toolPart: Part = {
 				id: "part-tool-1",
+				sessionID: "sess-child-11",
 				messageID: "msg-1",
 				type: "tool",
-				content: "",
 				tool: "read",
 				state: {
 					status: "running",
@@ -345,9 +347,9 @@ describe("SubagentView", () => {
 
 			const taskPart: Part = {
 				id: "part-task-1",
+				sessionID: "sess-child-12",
 				messageID: "msg-1",
 				type: "tool",
-				content: "",
 				tool: "task",
 				state: {
 					status: "running",
@@ -420,9 +422,9 @@ describe("SubagentView", () => {
 
 			const taskPart: Part = {
 				id: "part-task-1",
+				sessionID: "sess-child-13",
 				messageID: "msg-1",
 				type: "tool",
-				content: "",
 				tool: "task",
 				state: {
 					status: "running",
@@ -499,9 +501,9 @@ describe("SubagentView", () => {
 
 			const toolPart: Part = {
 				id: "part-tool-1",
+				sessionID: "sess-child-14",
 				messageID: "msg-1",
 				type: "tool",
-				content: "",
 				tool: "read",
 				state: {
 					status: "completed",

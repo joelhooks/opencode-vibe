@@ -1,78 +1,56 @@
 /**
- * ServerDiscovery Effect Service
+ * Discovery Browser Layer
  *
- * Discovers running OpenCode servers via /api/opencode/servers endpoint.
- * Returns gracefully degraded results on failure (empty array).
+ * Browser-safe implementation of the Discovery service using fetch to
+ * /api/opencode/servers endpoint. Supports full DiscoveryOptions via query params.
  *
  * @module discovery
  */
 
-import { Context, Effect, Layer } from "effect"
+import { Effect, Layer } from "effect"
+import { Discovery, type DiscoveredServer, type DiscoveryOptions } from "./types.js"
 
 /**
- * Server information with URL included
+ * Type guard for DiscoveredServer
  */
-export interface ServerInfo {
-	port: number
-	directory: string
-	url: string
-}
-
-/**
- * Raw server info from API (before URL transformation)
- */
-interface RawServerInfo {
-	port: number
-	pid: number
-	directory: string
-}
-
-/**
- * ServerDiscovery service interface
- */
-export interface ServerDiscoveryService {
-	/**
-	 * Discover running OpenCode servers
-	 * Returns empty array on failure (graceful degradation)
-	 */
-	discover: () => Effect.Effect<ServerInfo[], never, never>
-}
-
-/**
- * ServerDiscovery service tag for dependency injection
- */
-export const ServerDiscovery = Context.GenericTag<ServerDiscoveryService>("ServerDiscovery")
-
-/**
- * Type guard for RawServerInfo
- */
-function isValidRawServer(data: unknown): data is RawServerInfo {
+function isValidServer(data: unknown): data is DiscoveredServer {
 	if (!data || typeof data !== "object") return false
 	const obj = data as Record<string, unknown>
-	return typeof obj.port === "number" && typeof obj.directory === "string"
+	return (
+		typeof obj.port === "number" && typeof obj.pid === "number" && typeof obj.directory === "string"
+	)
 }
 
 /**
- * Transform raw server info to ServerInfo (adds url field)
+ * Build query string from DiscoveryOptions
  */
-function transformServer(raw: RawServerInfo): ServerInfo {
-	return {
-		port: raw.port,
-		directory: raw.directory,
-		url: `/api/opencode/${raw.port}`,
-	}
+function buildQueryString(options?: DiscoveryOptions): string {
+	if (!options) return ""
+
+	const params = new URLSearchParams()
+	if (options.includeSessions) params.set("includeSessions", "true")
+	if (options.includeSessionDetails) params.set("includeSessionDetails", "true")
+	if (options.includeProjects) params.set("includeProjects", "true")
+	if (options.timeout !== undefined) params.set("timeout", String(options.timeout))
+
+	const query = params.toString()
+	return query ? `?${query}` : ""
 }
 
 /**
- * Create ServerDiscovery implementation with injectable fetch
+ * Create Discovery implementation with injectable fetch
  */
-function makeServerDiscovery(fetchFn: typeof fetch = fetch): ServerDiscoveryService {
+function makeDiscovery(fetchFn: typeof fetch = fetch) {
 	return {
-		discover: () =>
+		discover: (options?: DiscoveryOptions) =>
 			Effect.gen(function* () {
+				// Build endpoint URL with query params
+				const queryString = buildQueryString(options)
+				const url = `/api/opencode/servers${queryString}`
+
 				// Fetch from API endpoint
 				const response = yield* Effect.tryPromise({
-					try: () => fetchFn("/api/opencode/servers"),
+					try: () => fetchFn(url),
 					catch: () => new Error("Failed to fetch servers"),
 				})
 
@@ -87,12 +65,12 @@ function makeServerDiscovery(fetchFn: typeof fetch = fetch): ServerDiscoveryServ
 					catch: () => new Error("Failed to parse JSON"),
 				})
 
-				// Validate and transform
+				// Validate and filter
 				if (!Array.isArray(data)) {
 					return []
 				}
 
-				const servers = data.filter(isValidRawServer).map(transformServer)
+				const servers = data.filter(isValidServer)
 				return servers
 			}).pipe(
 				// On ANY error, return empty array (graceful degradation)
@@ -102,18 +80,21 @@ function makeServerDiscovery(fetchFn: typeof fetch = fetch): ServerDiscoveryServ
 }
 
 /**
- * Default ServerDiscovery implementation using global fetch
+ * DiscoveryBrowserLive Layer
+ *
+ * Provides Discovery service using browser fetch.
+ * Use in browser/Next.js app.
  */
-const ServerDiscoveryLive = Layer.succeed(ServerDiscovery, makeServerDiscovery())
+export const DiscoveryBrowserLive = Layer.succeed(Discovery, makeDiscovery())
 
 /**
- * Default ServerDiscovery layer
+ * Default export for backwards compatibility
  */
-export const Default = ServerDiscoveryLive
+export const Default = DiscoveryBrowserLive
 
 /**
  * Create a test layer with custom fetch implementation
  * @internal
  */
 export const makeTestLayer = (fetchFn: typeof fetch) =>
-	Layer.succeed(ServerDiscovery, makeServerDiscovery(fetchFn))
+	Layer.succeed(Discovery, makeDiscovery(fetchFn))

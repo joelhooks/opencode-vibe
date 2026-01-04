@@ -212,8 +212,8 @@ export async function getStatus(
 			const statusParts = parts.map((p) => ({
 				messageId: p.messageID,
 				type: p.type,
-				tool: p.tool,
-				state: p.state,
+				tool: p.type === "tool" ? p.tool : undefined,
+				state: p.type === "tool" ? p.state : undefined,
 			}))
 			return statusService.computeStatus({
 				sessionId,
@@ -267,8 +267,8 @@ export async function listWithStatus(
 				const statusParts = parts.map((p) => ({
 					messageId: p.messageID,
 					type: p.type,
-					tool: p.tool,
-					state: p.state,
+					tool: p.type === "tool" ? p.tool : undefined,
+					state: p.type === "tool" ? p.state : undefined,
 				}))
 
 				const status = statusService.computeStatus({

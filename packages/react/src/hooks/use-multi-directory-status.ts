@@ -97,21 +97,14 @@ export function useMultiDirectoryStatus(
 	 * - Replaced Zustand subscription with World Stream
 	 * - World Stream already provides computed status via EnrichedSession
 	 * - Removed computeStatusSync call (Core handles this now)
+	 *
+	 * FIX (2026-01-04): Removed sessionStatuses from deps to prevent infinite loop.
+	 * The effect was triggering itself by setting sessionStatuses which was in its deps.
+	 * Now uses functional updates to access prev state without needing it in deps.
 	 */
 	useEffect(() => {
 		for (const session of filteredSessions) {
 			const { id: sessionId, status: statusValue, lastActivityAt } = session
-
-			// Debug log status changes
-			const prevStatus = sessionStatuses[sessionId]
-			if (prevStatus !== statusValue) {
-				console.debug("[useMultiDirectoryStatus] status changed:", {
-					sessionId,
-					prevStatus,
-					newStatus: statusValue,
-					directory: session.directory,
-				})
-			}
 
 			if (statusValue === "running") {
 				// Cancel any pending cooldown
@@ -121,10 +114,12 @@ export function useMultiDirectoryStatus(
 					cooldownTimersRef.current.delete(sessionId)
 				}
 
-				setSessionStatuses((prev) => ({
-					...prev,
-					[sessionId]: "running",
-				}))
+				// Use functional update to avoid needing sessionStatuses in deps
+				setSessionStatuses((prev) => {
+					// Skip update if already running (prevents unnecessary re-renders)
+					if (prev[sessionId] === "running") return prev
+					return { ...prev, [sessionId]: "running" }
+				})
 				setLastActivity((prev) => ({
 					...prev,
 					[sessionId]: lastActivityAt,
@@ -150,7 +145,7 @@ export function useMultiDirectoryStatus(
 				}
 			}
 		}
-	}, [filteredSessions, sessionStatuses])
+	}, [filteredSessions]) // FIXED: Removed sessionStatuses from deps to prevent infinite loop
 
 	return { sessionStatuses, lastActivity }
 }

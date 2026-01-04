@@ -14,11 +14,12 @@ import type { Part } from "../types/index.js"
 function createMockPart(overrides?: Partial<Part>): Part {
 	return {
 		id: "part_123",
+		sessionID: "ses_123",
 		messageID: "msg_123",
 		type: "text",
-		content: "Hello",
+		text: "Hello",
 		...overrides,
-	}
+	} as Part
 }
 
 /**

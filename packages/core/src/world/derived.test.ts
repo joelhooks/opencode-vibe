@@ -102,9 +102,10 @@ describe("worldAtom derivation", () => {
 
 		const part: Part = {
 			id: "part-1",
+			sessionID: "ses-1",
 			messageID: "msg-1",
 			type: "text",
-			content: "Hello",
+			text: "Hello",
 		}
 
 		registry.set(sessionsAtom, new Map([["ses-1", session]]))
@@ -113,7 +114,11 @@ describe("worldAtom derivation", () => {
 		const world = registry.get(worldAtom)
 
 		expect(world.sessions[0].messages[0].parts).toHaveLength(1)
-		expect(world.sessions[0].messages[0].parts[0].content).toBe("Hello")
+		const firstPart = world.sessions[0].messages[0].parts[0]
+		expect(firstPart.type).toBe("text")
+		if (firstPart.type === "text") {
+			expect(firstPart.text).toBe("Hello")
+		}
 	})
 
 	it("applies session status from Map-based statusAtom", () => {

@@ -198,12 +198,17 @@ export const worldAtom = Atom.make((get) => {
 		projectByDirectory.set(project.worktree, project)
 	}
 
+	// Compute lastUpdated from actual data (most recent session activity)
+	// This ensures stable value when data doesn't change (no Date.now())
+	const lastUpdated =
+		enrichedSessions.length > 0 ? Math.max(...enrichedSessions.map((s) => s.lastActivityAt)) : 0
+
 	const worldState: WorldState = {
 		sessions: enrichedSessions,
 		activeSessionCount,
 		activeSession,
 		connectionStatus,
-		lastUpdated: Date.now(),
+		lastUpdated,
 		byDirectory,
 		stats,
 		instances, // Already converted to array above

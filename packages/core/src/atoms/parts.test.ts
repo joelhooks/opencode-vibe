@@ -14,13 +14,20 @@ import type { Part } from "../types/index.js"
 /**
  * Factory for creating test parts with minimal fields
  */
-function createPart(id: string, messageID: string, type = "text", content = ""): Part {
+function createPart(
+	id: string,
+	messageID: string,
+	sessionID = "ses-1",
+	type = "text",
+	text = "",
+): Part {
 	return {
 		id,
+		sessionID,
 		messageID,
 		type,
-		content,
-	}
+		text,
+	} as Part
 }
 
 /**

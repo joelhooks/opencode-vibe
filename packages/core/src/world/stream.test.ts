@@ -167,6 +167,38 @@ describe("createWorldStream with dependency injection", () => {
 			expect(after.connectionStatus).toBe("disconnected")
 		})
 	})
+
+	describe("getRegistry", () => {
+		it("exposes atom registry for external event routing", async () => {
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
+			const stream = createMergedWorldStream({ registry, sse })
+
+			// Should expose the registry
+			const exposedRegistry = stream.getRegistry()
+			expect(exposedRegistry).toBe(registry)
+
+			await stream.dispose()
+		})
+
+		it("registry can be used to update atoms externally", async () => {
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
+			const stream = createMergedWorldStream({ registry, sse })
+			const exposedRegistry = stream.getRegistry()
+
+			// Simulate external event router updating connection status
+			exposedRegistry.set(connectionStatusAtom, "connected")
+
+			// Should be reflected in snapshot
+			const snapshot = await stream.getSnapshot()
+			expect(snapshot.connectionStatus).toBe("connected")
+
+			await stream.dispose()
+		})
+	})
 })
 
 // Helper to create a valid session object

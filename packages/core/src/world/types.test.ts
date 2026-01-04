@@ -39,12 +39,14 @@ describe("WorldStream Types", () => {
 			id: "msg-123",
 			sessionID: "ses-123",
 			role: "assistant",
+			time: { created: Date.now() },
 			parts: [
 				{
 					id: "part-1",
+					sessionID: "ses-123",
 					messageID: "msg-123",
 					type: "text",
-					content: "Hello",
+					text: "Hello",
 				},
 			],
 			isStreaming: true,

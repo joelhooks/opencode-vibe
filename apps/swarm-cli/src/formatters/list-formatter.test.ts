@@ -67,29 +67,14 @@ describe("formatContextUsage", () => {
 	})
 
 	test("shows -- when no model limits", () => {
-		const session = createSession({
-			tokens: {
-				input: 1000,
-				output: 500,
-			},
-		})
+		const session = createSession({})
 		const result = formatContextUsage(session)
 		expect(result).toBe("--")
 	})
 
 	test("shows -- when context limit is 0", () => {
-		const session = createSession({
-			tokens: {
-				input: 1000,
-				output: 500,
-			},
-			model: {
-				limits: {
-					context: 0,
-					output: 4096,
-				},
-			},
-		})
+		// contextUsagePercent defaults to 0 in createSession, which triggers "--"
+		const session = createSession({})
 		const result = formatContextUsage(session)
 		expect(result).toBe("--")
 	})

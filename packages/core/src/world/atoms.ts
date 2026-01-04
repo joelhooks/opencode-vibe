@@ -12,7 +12,7 @@ import * as Registry from "@effect-atom/atom/Registry"
 import { Effect, Metric, Context, Layer } from "effect"
 import type { Message, Part, Session } from "../types/domain.js"
 import type { SessionStatus } from "../types/events.js"
-import type { Project, SessionStatus as SessionStatusObject } from "../types/sdk.js"
+import type { Project } from "../types/sdk.js"
 import type {
 	EnrichedMessage,
 	EnrichedSession,
@@ -973,12 +973,17 @@ function deriveWorldStateFromData(data: WorldStateData): WorldState {
 		projectByDirectory.set(project.worktree, project)
 	}
 
+	// Compute lastUpdated from actual data (most recent session activity)
+	// This ensures stable value when data doesn't change (no Date.now())
+	const lastUpdated =
+		enrichedSessions.length > 0 ? Math.max(...enrichedSessions.map((s) => s.lastActivityAt)) : 0
+
 	const worldState = {
 		sessions: enrichedSessions,
 		activeSessionCount,
 		activeSession,
 		connectionStatus: data.connectionStatus,
-		lastUpdated: Date.now(),
+		lastUpdated,
 		byDirectory,
 		statuses: new Map(Object.entries(data.status)), // Expose status map for consumers
 		stats,

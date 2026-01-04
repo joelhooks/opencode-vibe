@@ -363,7 +363,7 @@ describe("Merged Stream Integration Tests", () => {
 				const session = state.sessions.find((s) => s.id === "sess-parts")
 				const message = session?.messages.find((m) => m.id === "msg-xyz")
 				const part = message?.parts.find((p) => p.id === "part-001")
-				return part?.state?.status === "completed"
+				return part?.type === "tool" && part.state?.status === "completed"
 			})
 
 			const state = await stream.getSnapshot()
@@ -372,7 +372,10 @@ describe("Merged Stream Integration Tests", () => {
 			const part = message?.parts.find((p) => p.id === "part-001")
 
 			expect(part).toBeDefined()
-			expect(part?.state?.status).toBe("completed")
+			expect(part?.type).toBe("tool")
+			if (part?.type === "tool") {
+				expect(part.state?.status).toBe("completed")
+			}
 
 			await stream.dispose()
 		})

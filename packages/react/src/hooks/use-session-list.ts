@@ -1,13 +1,8 @@
 /**
- * useSessionList - Get sessions from Zustand store
+ * useSessionList - Get sessions from World Stream
  *
- * Returns sessions array from the store (updated via SSE).
+ * Delegates to World Stream for sessions array.
  * No local state, no loading/error - just a selector.
- *
- * Filters out archived sessions automatically.
- *
- * Uses useMemo to avoid creating new array references on every render,
- * which would cause infinite loops with useSyncExternalStore.
  *
  * @example
  * ```tsx
@@ -25,31 +20,22 @@
 
 "use client"
 
-import { useMemo } from "react"
 import type { Session } from "../store/types"
-import { useOpencodeStore } from "../store"
-import { useOpencode } from "../providers"
-
-const EMPTY_SESSIONS: Session[] = []
+import { useWorldSessionList } from "./use-world-session-list.js"
 
 /**
- * Hook to get all sessions from the store
+ * Hook to get all sessions
  *
- * Returns empty array if directory not initialized.
- * Session list updates automatically via SSE events.
- * Archived sessions are filtered out.
+ * MIGRATION NOTE (ADR-018 - Zustand Elimination):
+ * This hook now delegates to World Stream via useWorldSessionList.
+ * EnrichedSession extends Session, so the return type is compatible.
+ *
+ * Session list updates automatically via World Stream.
  *
  * @returns Array of sessions
  */
 export function useSessionList(): Session[] {
-	const { directory } = useOpencode()
-
-	// Select raw sessions array - stable reference from Immer
-	const sessions = useOpencodeStore((state) => state.directories[directory]?.sessions)
-
-	// Filter in useMemo to avoid creating new array on every render
-	return useMemo(() => {
-		if (!sessions) return EMPTY_SESSIONS
-		return sessions.filter((s) => !s.time?.archived)
-	}, [sessions])
+	// Delegate to World Stream
+	// EnrichedSession[] is compatible with Session[] (extends)
+	return useWorldSessionList()
 }

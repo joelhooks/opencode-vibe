@@ -5,11 +5,6 @@ import { useMessages, useMessagesWithParts, getOpencodeConfig, useSendMessage } 
 import { multiServerSSE } from "@opencode-vibe/core/sse"
 import { sessions } from "@opencode-vibe/core/api"
 
-interface OpencodeMessage {
-	info: { id: string; role: string; [key: string]: unknown }
-	parts: unknown[]
-}
-
 interface DebugPanelProps {
 	sessionId: string
 	isOpen: boolean
@@ -54,10 +49,7 @@ export function DebugPanel({ sessionId, isOpen }: DebugPanelProps) {
 
 	// useMemo hooks
 	const totalParts = useMemo(() => {
-		return messagesWithParts.reduce(
-			(sum: number, msg: OpencodeMessage) => sum + msg.parts.length,
-			0,
-		)
+		return messagesWithParts.reduce((sum: number, msg) => sum + msg.parts.length, 0)
 	}, [messagesWithParts])
 
 	// Check if discovery is complete before calling discovery methods

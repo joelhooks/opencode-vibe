@@ -161,6 +161,11 @@ export interface MergedStreamHandle extends WorldStreamHandle {
 	 * Internal use only - not part of public API
 	 */
 	stream(): Stream.Stream<SourceEvent, Error>
+	/**
+	 * Get the atom registry for external event routing
+	 * Used by React layer to wire multiServerSSE events to event-router.ts
+	 */
+	getRegistry(): Registry.Registry
 }
 
 /**
@@ -409,6 +414,7 @@ export function createMergedWorldStream(config: MergedStreamConfig = {}): Merged
 		subscribe,
 		getSnapshot,
 		stream,
+		getRegistry: () => registry,
 		[Symbol.asyncIterator]: asyncIterator,
 		dispose,
 	}

@@ -118,14 +118,18 @@ export const SubagentView = React.memo(SubagentViewInternal, (prevProps, nextPro
 
 		if (prevParts.length !== nextParts.length) return false
 
-		// Compare part IDs, types, content, and state
+		// Compare part IDs, types, and state
 		for (let i = 0; i < prevParts.length; i++) {
 			const prevPart = prevParts[i]
 			const nextPart = nextParts[i]
 			if (!prevPart || !nextPart) return false
 			if (prevPart.id !== nextPart.id) return false
 			if (prevPart.type !== nextPart.type) return false
-			if (prevPart.content !== nextPart.content) return false
+
+			// For text parts, compare text content
+			if (prevPart.type === "text" && nextPart.type === "text") {
+				if (prevPart.text !== nextPart.text) return false
+			}
 
 			// For tool parts, compare state to detect updates
 			if (prevPart.type === "tool" && nextPart.type === "tool") {

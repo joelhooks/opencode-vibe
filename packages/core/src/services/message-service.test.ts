@@ -38,25 +38,27 @@ describe("MessageService", () => {
 			const parts: Part[] = [
 				{
 					id: "part-1",
+					sessionID: "ses-123",
 					messageID: "msg-1",
 					type: "text",
-					content: "Hello",
+					text: "Hello",
 				},
 				{
 					id: "part-2",
+					sessionID: "ses-123",
 					messageID: "msg-2",
 					type: "text",
-					content: "Hi there",
+					text: "Hi there",
 				},
 				{
 					id: "part-3",
+					sessionID: "ses-123",
 					messageID: "msg-2",
 					type: "tool",
 					tool: "task",
-					content: "",
 					state: { status: "running" },
 				},
-			]
+			] as Part[]
 
 			const effect = Effect.gen(function* (_) {
 				const service = yield* _(MessageService)
@@ -139,10 +141,10 @@ describe("MessageService", () => {
 			]
 
 			const parts: Part[] = [
-				{ id: "part-1", messageID: "msg-1", type: "text", content: "A" },
-				{ id: "part-2", messageID: "msg-2", type: "text", content: "B" },
-				{ id: "part-3", messageID: "msg-3", type: "text", content: "C" },
-			]
+				{ id: "part-1", sessionID: "ses-123", messageID: "msg-1", type: "text", text: "A" },
+				{ id: "part-2", sessionID: "ses-123", messageID: "msg-2", type: "text", text: "B" },
+				{ id: "part-3", sessionID: "ses-123", messageID: "msg-3", type: "text", text: "C" },
+			] as Part[]
 
 			const effect = Effect.gen(function* (_) {
 				const service = yield* _(MessageService)
@@ -170,17 +172,19 @@ describe("MessageService", () => {
 			const parts: Part[] = [
 				{
 					id: "part-1",
+					sessionID: "ses-123",
 					messageID: "msg-1",
 					type: "text",
-					content: "This part is fine",
+					text: "This part is fine",
 				},
 				{
 					id: "part-2",
+					sessionID: "ses-123",
 					messageID: "msg-other",
 					type: "text",
-					content: "This part belongs to different message",
+					text: "This part belongs to different message",
 				},
-			]
+			] as Part[]
 
 			const effect = Effect.gen(function* (_) {
 				const service = yield* _(MessageService)
@@ -205,17 +209,25 @@ describe("MessageService", () => {
 			]
 
 			const parts: Part[] = [
-				{ id: "part-1", messageID: "msg-1", type: "text", content: "First" },
-				{ id: "part-2", messageID: "msg-1", type: "text", content: "Second" },
-				{ id: "part-3", messageID: "msg-1", type: "tool", tool: "bash", content: "ls" },
+				{ id: "part-1", sessionID: "ses-123", messageID: "msg-1", type: "text", text: "First" },
+				{ id: "part-2", sessionID: "ses-123", messageID: "msg-1", type: "text", text: "Second" },
+				{
+					id: "part-3",
+					sessionID: "ses-123",
+					messageID: "msg-1",
+					type: "tool",
+					tool: "bash",
+					state: {},
+				},
 				{
 					id: "part-4",
+					sessionID: "ses-123",
 					messageID: "msg-1",
-					type: "tool_result",
+					type: "tool",
 					tool: "bash",
-					content: "file.txt",
+					state: {},
 				},
-			]
+			] as Part[]
 
 			const effect = Effect.gen(function* (_) {
 				const service = yield* _(MessageService)
@@ -253,8 +265,8 @@ describe("MessageService", () => {
 			]
 
 			const parts: Part[] = [
-				{ id: "part-1", messageID: "msg-1", type: "text", content: "Response" },
-			]
+				{ id: "part-1", sessionID: "ses-123", messageID: "msg-1", type: "text", text: "Response" },
+			] as Part[]
 
 			const effect = Effect.gen(function* (_) {
 				const service = yield* _(MessageService)
@@ -298,16 +310,16 @@ describe("MessageService", () => {
 			const parts: Part[] = [
 				{
 					id: "part-1",
+					sessionID: "ses-123",
 					messageID: "msg-1",
 					type: "tool",
-					content: "ls -la",
 					tool: "bash",
 					state: {
 						status: "running",
 						metadata: { timeout: 5000 },
 					},
 				},
-			]
+			] as Part[]
 
 			const effect = Effect.gen(function* (_) {
 				const service = yield* _(MessageService)
@@ -317,11 +329,10 @@ describe("MessageService", () => {
 			const result = await runEffect(effect)
 
 			expect(result).toHaveLength(1)
-			const part = result[0].parts[0]
+			const part = result[0].parts[0] as any
 			expect(part.id).toBe("part-1")
 			expect(part.messageID).toBe("msg-1")
 			expect(part.type).toBe("tool")
-			expect(part.content).toBe("ls -la")
 			expect(part.tool).toBe("bash")
 			expect(part.state).toEqual({
 				status: "running",
@@ -337,19 +348,21 @@ describe("MessageService", () => {
 					id: "msg-1",
 					sessionID: "ses-123",
 					role: "user",
-					// No parentID, time, finish, etc.
+					time: { created: Date.now() },
+					// No parentID, finish, etc.
 				},
 			]
 
 			const parts: Part[] = [
 				{
 					id: "part-1",
+					sessionID: "ses-123",
 					messageID: "msg-1",
 					type: "text",
-					content: "Hello",
+					text: "Hello",
 					// No tool, state, etc.
 				},
-			]
+			] as Part[]
 
 			const effect = Effect.gen(function* (_) {
 				const service = yield* _(MessageService)
@@ -374,9 +387,9 @@ describe("MessageService", () => {
 			]
 
 			const parts: Part[] = [
-				{ id: "part-1", messageID: "msg-1", type: "text", content: "OK" },
-				{ id: "part-2", messageID: "msg-999", type: "text", content: "Orphan" },
-			]
+				{ id: "part-1", sessionID: "ses-123", messageID: "msg-1", type: "text", text: "OK" },
+				{ id: "part-2", sessionID: "ses-123", messageID: "msg-999", type: "text", text: "Orphan" },
+			] as Part[]
 
 			const effect = Effect.gen(function* (_) {
 				const service = yield* _(MessageService)

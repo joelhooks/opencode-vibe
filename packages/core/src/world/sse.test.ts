@@ -22,6 +22,9 @@ import {
 	Registry,
 	connectionStatusAtom,
 	sessionsAtom,
+	messagesAtom,
+	partsAtom,
+	statusAtom,
 	instancesAtom,
 	sessionToInstancePortAtom,
 	projectsAtom,
@@ -584,6 +587,130 @@ describe("WorldSSE - Registry Integration", () => {
 		expect(sessions.size).toBe(0)
 
 		sse.stop()
+	})
+})
+
+// ============================================================================
+// Effect Schema Integration Tests (NEW - bd-opencode-next--xts0a-mjz9yjqnc6h)
+// ============================================================================
+
+describe("WorldSSE - Effect Schema Integration", () => {
+	let registry: Registry.Registry
+	let sse: WorldSSE
+
+	beforeEach(() => {
+		registry = Registry.make()
+	})
+
+	afterEach(() => {
+		sse?.stop()
+	})
+
+	it("parses message.part.updated and accesses part.sessionID directly", () => {
+		const events: any[] = []
+		sse = new WorldSSE(registry, {
+			serverUrl: "http://localhost:3000",
+			onEvent: (event) => events.push(event),
+		})
+
+		// Simulate raw SSE event (what comes from backend)
+		const rawEvent = {
+			type: "message.part.updated",
+			properties: {
+				part: {
+					id: "part-123",
+					sessionID: "sess-456", // CRITICAL: sessionID is here
+					messageID: "msg-789",
+					type: "text",
+					text: "Hello world",
+				},
+			},
+		}
+
+		// Call handleEvent directly (private method, but we can test the integration)
+		;(sse as any).handleEvent(rawEvent, 3000)
+
+		// Verify part was stored
+		const parts = registry.get(partsAtom)
+		expect(parts.size).toBe(1)
+		expect(parts.has("part-123")).toBe(true)
+
+		const part = parts.get("part-123")
+		expect(part?.sessionID).toBe("sess-456")
+		expect(part?.messageID).toBe("msg-789")
+
+		// Verify status was updated to "running"
+		const statuses = registry.get(statusAtom)
+		expect(statuses.get("sess-456")).toBe("running")
+	})
+
+	it("parses session.status with object discriminated union", () => {
+		sse = new WorldSSE(registry, {
+			serverUrl: "http://localhost:3000",
+		})
+
+		const rawEvent = {
+			type: "session.status",
+			properties: {
+				sessionID: "sess-123",
+				status: { type: "idle" },
+			},
+		}
+
+		;(sse as any).handleEvent(rawEvent, 3000)
+
+		const statuses = registry.get(statusAtom)
+		expect(statuses.get("sess-123")).toBe("idle")
+	})
+
+	it("parses session.status with retry status", () => {
+		sse = new WorldSSE(registry, {
+			serverUrl: "http://localhost:3000",
+		})
+
+		const rawEvent = {
+			type: "session.status",
+			properties: {
+				sessionID: "sess-123",
+				status: {
+					type: "retry",
+					attempt: 2,
+					message: "Rate limited",
+					next: 5000,
+				},
+			},
+		}
+
+		;(sse as any).handleEvent(rawEvent, 3000)
+
+		// Retry maps to "running"
+		const statuses = registry.get(statusAtom)
+		expect(statuses.get("sess-123")).toBe("running")
+	})
+
+	it("skips invalid events without crashing", () => {
+		sse = new WorldSSE(registry, {
+			serverUrl: "http://localhost:3000",
+		})
+
+		const invalidEvent = {
+			type: "unknown.event",
+			properties: {},
+		}
+
+		// Should not throw
+		expect(() => {
+			;(sse as any).handleEvent(invalidEvent, 3000)
+		}).not.toThrow()
+
+		// Should not store anything
+		const sessions = registry.get(sessionsAtom)
+		const messages = registry.get(messagesAtom)
+		const parts = registry.get(partsAtom)
+
+		expect(sessions.size).toBe(0)
+		expect(messages.size).toBe(0)
+		expect(parts.size).toBe(0)
 	})
 })
 

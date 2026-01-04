@@ -8,12 +8,26 @@
 
 import { exec } from "child_process"
 import { promisify } from "util"
-import type { DiscoveredServer } from "../types/events.js"
+import type { DiscoveredServer, DiscoveredSession, DiscoveredProject } from "../types/events.js"
 
 const execAsync = promisify(exec)
 
 // Re-export canonical type
 export type { DiscoveredServer }
+
+/**
+ * Options for server discovery
+ */
+export interface DiscoveryOptions {
+	/** Include session IDs for each server */
+	includeSessions?: boolean
+	/** Include full session details (id, title, updatedAt) */
+	includeSessionDetails?: boolean
+	/** Include project info */
+	includeProjects?: boolean
+	/** Timeout for verification requests in ms (default: 500) */
+	timeout?: number
+}
 
 interface CandidatePort {
 	port: number
@@ -24,9 +38,13 @@ interface CandidatePort {
  * Verify a port is actually an opencode server and get its directory
  * Returns null if not a valid opencode server
  */
-async function verifyOpencodeServer(candidate: CandidatePort): Promise<DiscoveredServer | null> {
+async function verifyOpencodeServer(
+	candidate: CandidatePort,
+	options: DiscoveryOptions = {},
+): Promise<DiscoveredServer | null> {
+	const timeout = options.timeout ?? 500
 	const controller = new AbortController()
-	const timeoutId = setTimeout(() => controller.abort(), 500)
+	const timeoutId = setTimeout(() => controller.abort(), timeout)
 
 	try {
 		const res = await fetch(`http://127.0.0.1:${candidate.port}/project/current`, {
@@ -43,11 +61,55 @@ async function verifyOpencodeServer(candidate: CandidatePort): Promise<Discovere
 			return null
 		}
 
-		return {
+		const server: DiscoveredServer = {
 			port: candidate.port,
 			pid: candidate.pid,
 			directory,
 		}
+
+		// Optionally include project info
+		if (options.includeProjects) {
+			server.project = {
+				id: project.id || "unknown",
+				directory,
+				name: directory.split("/").pop() || directory,
+			}
+		}
+
+		// Optionally fetch sessions
+		if (options.includeSessions || options.includeSessionDetails) {
+			try {
+				const sessionController = new AbortController()
+				const sessionTimeout = setTimeout(() => sessionController.abort(), 300)
+				const sessionRes = await fetch(`http://127.0.0.1:${candidate.port}/session`, {
+					signal: sessionController.signal,
+				})
+				clearTimeout(sessionTimeout)
+
+				if (sessionRes.ok) {
+					const sessionList = await sessionRes.json()
+					if (Array.isArray(sessionList)) {
+						// Always include IDs if either option is set
+						server.sessions = sessionList.map((s: { id: string }) => s.id)
+
+						// Include full details if requested
+						if (options.includeSessionDetails) {
+							server.sessionDetails = sessionList.map(
+								(s: { id: string; title?: string; time?: { updated?: number } }) => ({
+									id: s.id,
+									title: s.title || "Untitled",
+									updatedAt: s.time?.updated || 0,
+								}),
+							)
+						}
+					}
+				}
+			} catch {
+				// Session fetch failed - not critical, continue without sessions
+			}
+		}
+
+		return server
 	} catch {
 		clearTimeout(timeoutId)
 		return null
@@ -82,8 +144,12 @@ async function promiseAllSettledLimit<T>(tasks: (() => Promise<T>)[], limit: num
 /**
  * Discover all running OpenCode servers
  * Can be called directly during SSR without HTTP self-fetch
+ *
+ * @param options - Discovery options
+ * @param options.includeSessions - Fetch session IDs for each server (default: false)
+ * @param options.timeout - Verification timeout in ms (default: 500)
  */
-export async function discoverServers(): Promise<DiscoveredServer[]> {
+export async function discoverServers(options: DiscoveryOptions = {}): Promise<DiscoveredServer[]> {
 	try {
 		// Find all listening TCP ports for bun/opencode processes
 		const { stdout } = await execAsync(
@@ -115,7 +181,7 @@ export async function discoverServers(): Promise<DiscoveredServer[]> {
 		}
 
 		// Verify candidates with limited concurrency (max 5 at a time)
-		const tasks = candidates.map((c) => () => verifyOpencodeServer(c))
+		const tasks = candidates.map((c) => () => verifyOpencodeServer(c, options))
 		const results = await promiseAllSettledLimit(tasks, 5)
 		return results.filter((s): s is DiscoveredServer => s !== null)
 	} catch {

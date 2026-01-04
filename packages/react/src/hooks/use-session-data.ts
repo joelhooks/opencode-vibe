@@ -1,8 +1,8 @@
 /**
- * useSessionData - Get session from Zustand store
+ * useSessionData - Get session from World Stream
  *
- * Returns session data from the store (updated via SSE).
- * No local state, no loading/error - just a selector.
+ * Delegates to World Stream for session data.
+ * Returns undefined if session not found or archived.
  *
  * @example
  * ```tsx
@@ -19,32 +19,23 @@
 "use client"
 
 import type { Session } from "../store/types"
-import { useOpencodeStore } from "../store"
-import { useOpencode } from "../providers"
+import { useWorldSession } from "./use-world-session.js"
 
 /**
- * Hook to get a single session from the store
+ * Hook to get a single session
  *
- * Returns undefined if session not found or archived.
- * Session data updates automatically via SSE events.
+ * MIGRATION NOTE (ADR-018 - Zustand Elimination):
+ * This hook now delegates to World Stream via useWorldSession.
+ * EnrichedSession extends Session, so the return type is compatible.
+ *
+ * Returns undefined if session not found.
+ * Session data updates automatically via World Stream.
  *
  * @param sessionId - Session ID to retrieve
  * @returns Session or undefined
  */
 export function useSessionData(sessionId: string): Session | undefined {
-	const { directory } = useOpencode()
-
-	return useOpencodeStore((state) => {
-		const sessions = state.directories[directory]?.sessions
-		if (!sessions) return undefined
-
-		const session = sessions.find((s) => s.id === sessionId)
-
-		// Filter out archived sessions
-		if (session?.time?.archived) {
-			return undefined
-		}
-
-		return session
-	})
+	// Delegate to World Stream
+	// EnrichedSession extends Session, so this is type-safe
+	return useWorldSession(sessionId)
 }

@@ -17,13 +17,36 @@ export type { GlobalEvent } from "./sdk.js"
 export type SessionStatus = "pending" | "running" | "completed" | "error" | "idle"
 
 /**
+ * Session summary for discovery response
+ */
+export interface DiscoveredSession {
+	id: string
+	title: string
+	updatedAt: number
+}
+
+/**
+ * Project summary for discovery response
+ */
+export interface DiscoveredProject {
+	id: string
+	directory: string
+	name: string
+}
+
+/**
  * Discovered OpenCode server instance
  */
 export interface DiscoveredServer {
 	port: number
 	pid: number
 	directory: string
-	sessions?: string[] // Session IDs hosted by this server
+	/** Session IDs hosted by this server (when includeSessions=true) */
+	sessions?: string[]
+	/** Full session details (when includeSessionDetails=true) */
+	sessionDetails?: DiscoveredSession[]
+	/** Project info (when includeProjects=true) */
+	project?: DiscoveredProject
 }
 
 /**

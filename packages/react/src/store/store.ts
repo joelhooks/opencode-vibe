@@ -8,10 +8,11 @@
  * Each directory has isolated state with sessions, messages, parts, todos, etc.
  */
 
+import { Binary } from "@opencode-vibe/core"
+import type { Message, Part } from "@opencode-vibe/core/types"
 import { create } from "zustand"
 import { immer } from "zustand/middleware/immer"
-import { Binary } from "@opencode-vibe/core"
-import type { Session, Message, Part, SessionStatus, DirectoryState, GlobalEvent } from "./types"
+import type { DirectoryState, GlobalEvent, Session, SessionStatus } from "./types"
 
 /**
  * Default model limits when API unavailable or model not found.
@@ -163,16 +164,23 @@ type OpencodeActions = {
  * @returns DirectoryState with all fields initialized to empty/default values
  *
  * @remarks
- * Key fields:
- * - `sessions`, `messages`, `parts`: Sorted arrays for O(log n) binary search
- * - `modelLimits`: Cached model context/output limits for offline usage
+ * MIGRATION NOTE (ADR-018 - Zustand Elimination Phase 5):
+ * The following fields are DEPRECATED and should be removed from DirectoryState:
+ * - `sessions` → use world.sessions (World Stream)
+ * - `messages` → use world.sessions[].messages (World Stream)
+ * - `parts` → use world.sessions[].messages[].parts (World Stream)
+ *
+ * Keep only UI-local state:
+ * - `ready` → Bootstrap/initialization flag (UI state)
+ * - `todos` → Session todos (not yet in World Stream)
+ * - `modelLimits` → Model context/output limits cache (offline capability)
  */
 const createEmptyDirectoryState = (): DirectoryState => ({
 	ready: false,
-	sessions: [],
+	sessions: [], // DEPRECATED - use world.sessions
 	todos: {},
-	messages: {},
-	parts: {},
+	messages: {}, // DEPRECATED - use world.sessions[].messages
+	parts: {}, // DEPRECATED - use world.sessions[].messages[].parts
 	modelLimits: {},
 })
 
@@ -232,183 +240,26 @@ export const useOpencodeStore = create<OpencodeState & OpencodeActions>()(
 
 				switch (event.type) {
 					// ═══════════════════════════════════════════════════════════════
-					// SESSION EVENTS
+					// SESSION/MESSAGE/PART EVENTS - Handled by World Stream (ADR-018)
 					// ═══════════════════════════════════════════════════════════════
+					// Core data (sessions, messages, parts) flows through World Stream atoms.
+					// Events are routed via multiServerSSE → routeEvent() → World Stream.
+					// These cases are no-ops to prevent "unhandled event" warnings.
 					case "session.created":
-					case "session.updated": {
-						const session = event.properties.info as Session
-						const beforeCount = dir.sessions.length
-						const result = Binary.search(dir.sessions, session.id, (s: Session) => s.id)
-						const isNewSession = !result.found
-
-						// Handle archived sessions (remove them)
-						if (session.time.archived) {
-							if (result.found) {
-								dir.sessions.splice(result.index, 1)
-								console.log("[store] Removed archived session:", {
-									sessionId: session.id,
-									directory,
-									remainingCount: dir.sessions.length,
-								})
-							}
-							break
-						}
-
-						// Update or insert
-						if (result.found) {
-							dir.sessions[result.index] = session
-							console.log("[store] Updated existing session:", {
-								sessionId: session.id,
-								directory,
-								beforeCount,
-								afterCount: dir.sessions.length,
-							})
-						} else {
-							dir.sessions.splice(result.index, 0, session)
-							console.log("[store] Added NEW session:", {
-								sessionId: session.id,
-								title: session.title,
-								directory,
-								insertedAtIndex: result.index,
-								beforeCount,
-								afterCount: dir.sessions.length,
-								allSessionIds: dir.sessions.map((s) => s.id),
-							})
-						}
+					case "session.updated":
+					case "session.status":
+					case "session.diff":
+					case "session.deleted":
+					case "session.compacted":
+					case "message.updated":
+					case "message.removed":
+					case "message.part.updated":
+					case "message.part.removed":
+						// Handled by World Stream - no action needed
 						break
-					}
-
-					case "session.status": {
-						/**
-						 * Session status is now handled by World Stream (ADR-018)
-						 * This event is ignored - status comes from world.sessions[].status
-						 */
-						console.debug("[store] session.status ignored (handled by World Stream):", {
-							sessionID: event.properties.sessionID,
-							status: event.properties.status,
-							directory,
-						})
-						break
-					}
-
-					case "session.diff": {
-						/**
-						 * Session diff is now handled by World Stream (ADR-018)
-						 * This event is ignored - diff comes from world.sessions[].diff
-						 */
-						console.debug("[store] session.diff ignored (handled by World Stream)")
-						break
-					}
-
-					case "session.deleted": {
-						const sessionID = event.properties.sessionID
-						const result = Binary.search(dir.sessions, sessionID, (s: Session) => s.id)
-						if (result.found) {
-							dir.sessions.splice(result.index, 1)
-						}
-						break
-					}
-
-					case "session.compacted": {
-						/**
-						 * Compaction state is now handled by World Stream (ADR-018)
-						 * This event is ignored - compaction comes from world.sessions[].compactionState
-						 */
-						console.debug("[store] session.compacted ignored (handled by World Stream)")
-						break
-					}
 
 					// ═══════════════════════════════════════════════════════════════
-					// MESSAGE EVENTS
-					// ═══════════════════════════════════════════════════════════════
-					case "message.updated": {
-						const message = event.properties.info as Message
-						const sessionID = message.sessionID
-
-						// Initialize messages array if needed
-						if (!dir.messages[sessionID]) {
-							dir.messages[sessionID] = []
-						}
-
-						const messages = dir.messages[sessionID]
-						if (!messages) return
-						const result = Binary.search(messages, message.id, (m: Message) => m.id)
-
-						if (result.found) {
-							messages[result.index] = message
-						} else {
-							messages.splice(result.index, 0, message)
-						}
-
-						/**
-						 * Context usage and compaction detection removed (ADR-018)
-						 *
-						 * Previously computed contextUsage and detected compaction messages here.
-						 * Now handled by World Stream:
-						 * - contextUsage comes from world.sessions[].contextUsage
-						 * - compactionState comes from world.sessions[].compactionState
-						 */
-						break
-					}
-
-					case "message.removed": {
-						const { sessionID, messageID } = event.properties
-						const messages = dir.messages[sessionID]
-						if (!messages) break
-
-						const result = Binary.search(messages, messageID, (m: Message) => m.id)
-						if (result.found) {
-							messages.splice(result.index, 1)
-						}
-						break
-					}
-
-					// ═══════════════════════════════════════════════════════════════
-					// PART EVENTS (streaming content)
-					// ═══════════════════════════════════════════════════════════════
-					case "message.part.updated": {
-						const part = event.properties.part as Part
-						const messageID = part.messageID
-
-						// Initialize parts array if needed
-						if (!dir.parts[messageID]) {
-							dir.parts[messageID] = []
-						}
-
-						const parts = dir.parts[messageID]
-						if (!parts) return
-						const result = Binary.search(parts, part.id, (p: Part) => p.id)
-
-						if (result.found) {
-							parts[result.index] = part
-						} else {
-							parts.splice(result.index, 0, part)
-						}
-
-						/**
-						 * Compaction part detection removed (ADR-018)
-						 *
-						 * Previously detected CompactionPart (type: "compaction") and set
-						 * dir.compaction[sessionID]. Now handled by World Stream:
-						 * - compactionState comes from world.sessions[].compactionState
-						 */
-						break
-					}
-
-					case "message.part.removed": {
-						const { messageID, partID } = event.properties
-						const parts = dir.parts[messageID]
-						if (!parts) break
-
-						const result = Binary.search(parts, partID, (p: Part) => p.id)
-						if (result.found) {
-							parts.splice(result.index, 1)
-						}
-						break
-					}
-
-					// ═══════════════════════════════════════════════════════════════
-					// TODO EVENTS
+					// TODO EVENTS (UI-local state - not yet in World Stream)
 					// ═══════════════════════════════════════════════════════════════
 					case "todo.updated": {
 						dir.todos[event.properties.sessionID] = event.properties.todos

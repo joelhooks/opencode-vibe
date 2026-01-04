@@ -6,10 +6,9 @@
  */
 
 export { useOpencodeStore, usePartSummary } from "./store.js"
+export type { Part, Message } from "@opencode-vibe/core/types"
 export type {
 	Session,
-	Message,
-	Part,
 	SessionStatus,
 	Todo,
 	FileDiff,

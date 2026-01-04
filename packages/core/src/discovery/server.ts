@@ -11,4 +11,8 @@
  */
 
 // Process-based discovery (Node.js only - uses child_process)
-export { discoverServers, type DiscoveredServer } from "./server-discovery.js"
+export {
+	discoverServers,
+	type DiscoveredServer,
+	type DiscoveryOptions,
+} from "./server-discovery.js"

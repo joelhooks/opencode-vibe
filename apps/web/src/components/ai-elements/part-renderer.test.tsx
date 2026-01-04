@@ -21,9 +21,10 @@ describe("PartRenderer", () => {
 	it("renders text parts", () => {
 		const part: Part = {
 			id: "part-1",
+			sessionID: "session-1",
 			messageID: "msg-1",
 			type: "text",
-			content: "Hello world",
+			text: "Hello world",
 		}
 
 		const { container } = render(<PartRenderer part={part} />)
@@ -37,9 +38,10 @@ describe("PartRenderer", () => {
 	it("renders multiline text with whitespace preserved", () => {
 		const part: Part = {
 			id: "part-2",
+			sessionID: "session-1",
 			messageID: "msg-1",
 			type: "text",
-			content: "Line 1\n  Line 2 with spaces\nLine 3",
+			text: "Line 1\n  Line 2 with spaces\nLine 3",
 		}
 
 		const { container } = render(<PartRenderer part={part} />)
@@ -52,9 +54,9 @@ describe("PartRenderer", () => {
 	it("renders tool parts with status and tool name", () => {
 		const part: Part = {
 			id: "part-3",
+			sessionID: "session-1",
 			messageID: "msg-1",
 			type: "tool",
-			content: "",
 			tool: "read",
 			state: {
 				status: "completed",
@@ -74,9 +76,9 @@ describe("PartRenderer", () => {
 	it("renders tool parts with running status", () => {
 		const part: Part = {
 			id: "part-4",
+			sessionID: "session-1",
 			messageID: "msg-1",
 			type: "tool",
-			content: "",
 			tool: "grep",
 			state: {
 				status: "running",
@@ -98,9 +100,9 @@ describe("PartRenderer", () => {
 	it("renders tool parts with pending status", () => {
 		const part: Part = {
 			id: "part-5",
+			sessionID: "session-1",
 			messageID: "msg-1",
 			type: "tool",
-			content: "",
 			tool: "edit",
 			state: {
 				status: "pending",
@@ -118,9 +120,9 @@ describe("PartRenderer", () => {
 	it("renders tool parts without title gracefully", () => {
 		const part: Part = {
 			id: "part-6",
+			sessionID: "session-1",
 			messageID: "msg-1",
 			type: "tool",
-			content: "",
 			tool: "bash",
 			state: {
 				status: "completed",
@@ -138,12 +140,12 @@ describe("PartRenderer", () => {
 	})
 
 	it("renders unknown part types as null", () => {
-		const part: Part = {
+		const part = {
 			id: "part-7",
+			sessionID: "session-1",
 			messageID: "msg-1",
 			type: "unknown-type",
-			content: "",
-		}
+		} as unknown as Part
 
 		const { container } = render(<PartRenderer part={part} />)
 
@@ -154,9 +156,9 @@ describe("PartRenderer", () => {
 	it("handles tool parts with error status", () => {
 		const part: Part = {
 			id: "part-8",
+			sessionID: "session-1",
 			messageID: "msg-1",
 			type: "tool",
-			content: "",
 			tool: "write",
 			state: {
 				status: "error",
@@ -178,9 +180,9 @@ describe("PartRenderer.memo", () => {
 	it("detects metadata.summary length changes for task tools", () => {
 		const part1: Part = {
 			id: "task-part-1",
+			sessionID: "session-1",
 			messageID: "msg-1",
 			type: "tool",
-			content: "",
 			tool: "task",
 			state: {
 				status: "running",
@@ -197,9 +199,9 @@ describe("PartRenderer.memo", () => {
 
 		const part2: Part = {
 			id: "task-part-1",
+			sessionID: "session-1",
 			messageID: "msg-1",
 			type: "tool",
-			content: "",
 			tool: "task",
 			state: {
 				status: "running",
@@ -228,9 +230,9 @@ describe("PartRenderer.memo", () => {
 	it("detects metadata.summary last item status changes for task tools", () => {
 		const part1: Part = {
 			id: "task-part-1",
+			sessionID: "session-1",
 			messageID: "msg-1",
 			type: "tool",
-			content: "",
 			tool: "task",
 			state: {
 				status: "running",
@@ -251,9 +253,9 @@ describe("PartRenderer.memo", () => {
 
 		const part2: Part = {
 			id: "task-part-1",
+			sessionID: "session-1",
 			messageID: "msg-1",
 			type: "tool",
-			content: "",
 			tool: "task",
 			state: {
 				status: "running",
@@ -282,9 +284,9 @@ describe("PartRenderer.memo", () => {
 	it("skips re-render when task tool metadata.summary is identical", () => {
 		const part1: Part = {
 			id: "task-part-1",
+			sessionID: "session-1",
 			messageID: "msg-1",
 			type: "tool",
-			content: "",
 			tool: "task",
 			state: {
 				status: "running",
@@ -305,9 +307,9 @@ describe("PartRenderer.memo", () => {
 
 		const part2: Part = {
 			id: "task-part-1",
+			sessionID: "session-1",
 			messageID: "msg-1",
 			type: "tool",
-			content: "",
 			tool: "task",
 			state: {
 				status: "running",
@@ -336,9 +338,9 @@ describe("PartRenderer.memo", () => {
 	it("skips re-render for non-task tool parts with identical state", () => {
 		const part1: Part = {
 			id: "read-part-1",
+			sessionID: "session-1",
 			messageID: "msg-1",
 			type: "tool",
-			content: "",
 			tool: "read",
 			state: {
 				status: "completed",
@@ -348,9 +350,9 @@ describe("PartRenderer.memo", () => {
 
 		const part2: Part = {
 			id: "read-part-1",
+			sessionID: "session-1",
 			messageID: "msg-1",
 			type: "tool",
-			content: "",
 			tool: "read",
 			state: {
 				status: "completed",
@@ -368,9 +370,9 @@ describe("PartRenderer.memo", () => {
 	it("detects status changes for non-task tools", () => {
 		const part1: Part = {
 			id: "read-part-1",
+			sessionID: "session-1",
 			messageID: "msg-1",
 			type: "tool",
-			content: "",
 			tool: "read",
 			state: {
 				status: "running",
@@ -380,9 +382,9 @@ describe("PartRenderer.memo", () => {
 
 		const part2: Part = {
 			id: "read-part-1",
+			sessionID: "session-1",
 			messageID: "msg-1",
 			type: "tool",
-			content: "",
 			tool: "read",
 			state: {
 				status: "completed",

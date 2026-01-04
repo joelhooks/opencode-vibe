@@ -23,10 +23,11 @@ describe("SubagentAtom", () => {
 
 	const mockPart: Part = {
 		id: "part-1",
+		sessionID: "child-123",
 		messageID: "msg-1",
 		type: "text",
-		content: "test part",
-	}
+		text: "test part",
+	} as Part
 
 	describe("create", () => {
 		test("creates a new subagent state ref", async () => {
@@ -243,7 +244,7 @@ describe("SubagentAtom", () => {
 			await Effect.runPromise(SubagentAtom.addMessage(stateRef, "child-123", mockMessage))
 			await Effect.runPromise(SubagentAtom.addPart(stateRef, "child-123", mockMessage.id, mockPart))
 
-			const updatedPart = { ...mockPart, content: "updated part" }
+			const updatedPart = { ...mockPart, text: "updated part" } as Part
 
 			await Effect.runPromise(
 				SubagentAtom.updatePart(stateRef, "child-123", mockMessage.id, updatedPart),
@@ -252,7 +253,7 @@ describe("SubagentAtom", () => {
 			const sessions = await Effect.runPromise(SubagentAtom.getSessions(stateRef))
 			const session = sessions["child-123"]
 
-			expect(session?.parts[mockMessage.id]?.[0]?.content).toBe("updated part")
+			expect((session?.parts[mockMessage.id]?.[0] as any)?.text).toBe("updated part")
 		})
 
 		test("does nothing if part does not exist", async () => {

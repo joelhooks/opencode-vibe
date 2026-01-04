@@ -1,7 +1,13 @@
 /**
- * ServerDiscovery Effect Service Tests
+ * Discovery Browser Layer Tests
  *
  * TDD - Tests written first, then implementation.
+ *
+ * Tests the DiscoveryBrowserLive layer implementation:
+ * - Fetch from /api/opencode/servers with DiscoveryOptions as query params
+ * - Transform to DiscoveredServer[]
+ * - Graceful degradation on errors
+ * - Support all DiscoveryOptions
  *
  * CHARACTERIZATION TESTS for Schedule.repeat polling loop:
  * - Polling interval timing
@@ -11,7 +17,8 @@
 
 import { describe, expect, test } from "vitest"
 import { Effect, Schedule, Duration, TestClock, TestContext, Fiber } from "effect"
-import { ServerDiscovery, makeTestLayer, type ServerInfo } from "./discovery.js"
+import { Discovery, type DiscoveredServer } from "./types.js"
+import { DiscoveryBrowserLive, makeTestLayer } from "./discovery.js"
 
 describe("ServerDiscovery - One-shot discovery", () => {
 	test("discover() returns servers with url field added", async () => {

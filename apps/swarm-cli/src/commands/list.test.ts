@@ -124,9 +124,9 @@ describe("list command", () => {
 				id: "test-session-1",
 				directory: "/test",
 				title: "Test Session",
-				model: { name: "test-model" },
+				projectID: "test-project",
+				version: "1.0.0",
 				time: { created: Date.now(), updated: Date.now() },
-				tokens: {},
 			}
 			const sessions = new Map(registry.get(sessionsAtom))
 			sessions.set(mockSession.id, mockSession)
@@ -181,9 +181,9 @@ describe("list command", () => {
 				id: "test-session-1",
 				directory: "/test",
 				title: "Test Session",
-				model: { name: "test-model" },
+				projectID: "test-project",
+				version: "1.0.0",
 				time: { created: Date.now(), updated: Date.now() },
-				tokens: {},
 			}
 
 			const sessions = new Map(registry.get(sessionsAtom))

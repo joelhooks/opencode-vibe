@@ -20,7 +20,7 @@ export type PartRendererProps = {
 const PartRendererInternal = ({ part }: PartRendererProps) => {
 	switch (part.type) {
 		case "text":
-			return <div className="text-sm whitespace-pre-wrap">{part.content}</div>
+			return <div className="text-sm whitespace-pre-wrap">{part.text}</div>
 		case "tool":
 			return <ToolPartView part={part} />
 		default:
@@ -95,8 +95,10 @@ export const PartRenderer = React.memo(PartRendererInternal, (prevProps, nextPro
 	// Fast path: Compare type
 	if (prev.type !== next.type) return false
 
-	// Fast path: Compare content
-	if (prev.content !== next.content) return false
+	// For text parts, compare text content
+	if (prev.type === "text" && next.type === "text") {
+		if (prev.text !== next.text) return false
+	}
 
 	// For tool parts, compare state
 	if (prev.type === "tool" && next.type === "tool") {

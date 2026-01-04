@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation"
 import { Suspense } from "react"
-import { createClientSSR } from "@opencode-vibe/core/client"
+import { createClientSSR } from "@opencode-vibe/core/client/server"
 import { transformMessages, type OpencodeMessage } from "@/lib/transform-messages"
 import type { Session } from "@opencode-ai/sdk/client"
 import { SessionLayout } from "./session-layout"

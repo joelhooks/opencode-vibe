@@ -5,7 +5,7 @@
 // === Public API (Stable) ===
 
 // World Stream (ADR-018 - Reactive World Stream)
-export { useWorld } from "./use-world"
+export { useWorld, getWorldRegistry } from "./use-world"
 export { useWorldSession } from "./use-world-session"
 export { useWorldConnection, type ConnectionStatus } from "./use-world-connection"
 export { useWorldMessages } from "./use-world-messages"

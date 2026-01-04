@@ -12,6 +12,9 @@
  * - @opencode-vibe/core/types - Type definitions
  */
 
+// Enable Zod→Effect bridge (adds .effect methods to Zod schemas)
+import "@zod-plugin/effect"
+
 // Re-export main modules
 export * from "./atoms/index.js"
 export * from "./discovery/index.js"

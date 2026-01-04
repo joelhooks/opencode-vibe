@@ -5,7 +5,7 @@
  * Each directory has isolated state with sessions, messages, parts, todos, etc.
  */
 
-import type { SessionStatus, GlobalEvent } from "@opencode-vibe/core/types"
+import type { SessionStatus, GlobalEvent, Part, Message } from "@opencode-vibe/core/types"
 
 /**
  * Session type matching OpenCode API
@@ -20,55 +20,6 @@ export type Session = {
 		updated: number
 		archived?: number
 	}
-}
-
-/**
- * Message type matching OpenCode API
- */
-export type Message = {
-	id: string
-	sessionID: string
-	role: string
-	parentID?: string // Assistant messages have parentID pointing to user message
-	time?: { created: number; completed?: number }
-	finish?: string // "stop", "tool-calls", etc. - only set when complete
-	tokens?: {
-		input: number
-		output: number
-		reasoning?: number
-		cache?: {
-			read: number
-			write: number
-		}
-	}
-	agent?: string // Agent name (e.g., "compaction")
-	model?: {
-		name: string
-		limits?: {
-			context: number
-			output: number
-		}
-	}
-	modelID?: string // Model ID as string (for looking up cached limits)
-	summary?: boolean // True for compaction summary messages
-	[key: string]: unknown // Allow additional fields
-}
-
-/**
- * Part type for streaming message content
- */
-export type Part = {
-	id: string
-	messageID: string
-	type: string
-	content: string
-	state?: {
-		status: string
-		metadata?: {
-			summary?: string
-		}
-	}
-	[key: string]: unknown // Allow additional fields
 }
 
 /**
@@ -130,4 +81,4 @@ export interface DirectoryState {
 }
 
 // Re-export canonical types from core (used in DirectoryState above)
-export type { SessionStatus, GlobalEvent }
+export type { SessionStatus, GlobalEvent, Part, Message }

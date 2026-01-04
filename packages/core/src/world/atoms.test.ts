@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest"
 import type { Message, Part, Session } from "../types/domain.js"
 import type { SessionStatus } from "../types/events.js"
 import type { Project } from "../types/sdk.js"
-import type { Instance } from "./types.js"
+import type { Instance, WorldState } from "./types.js"
 import { WorldStore } from "./atoms.js"
 
 describe("WorldStore", () => {
@@ -746,10 +746,11 @@ describe("WorldStore", () => {
 		const parts: Part[] = [
 			{
 				id: "part-1",
+				sessionID: "ses-1",
 				messageID: "msg-1",
 				type: "text",
-				content: "Hello",
-			},
+				text: "Hello",
+			} as Part,
 		]
 
 		store.setSessions(sessions)
@@ -759,7 +760,7 @@ describe("WorldStore", () => {
 		const state = store.getState()
 		expect(state.sessions[0].messages).toHaveLength(1)
 		expect(state.sessions[0].messages[0].parts).toHaveLength(1)
-		expect(state.sessions[0].messages[0].parts[0].content).toBe("Hello")
+		expect((state.sessions[0].messages[0].parts[0] as any).text).toBe("Hello")
 	})
 
 	it("computes isStreaming for incomplete assistant messages", () => {
@@ -1213,8 +1214,9 @@ describe("WorldStore", () => {
 			const part: Part = {
 				id: "part-1",
 				messageID: "msg-1",
-				type: "text",
-				content: "Hello",
+				sessionID: "ses-1",
+				type: "text" as const,
+				text: "Hello",
 			}
 
 			store.upsertPart(part)
@@ -1230,15 +1232,17 @@ describe("WorldStore", () => {
 			const part1: Part = {
 				id: "part-1",
 				messageID: "msg-1",
-				type: "text",
-				content: "Hello",
+				sessionID: "ses-1",
+				type: "text" as const,
+				text: "Hello",
 			}
 
 			const part2: Part = {
 				id: "part-1",
 				messageID: "msg-1",
-				type: "text",
-				content: "Hello World",
+				sessionID: "ses-1",
+				type: "text" as const,
+				text: "Hello World",
 			}
 
 			store.upsertPart(part1)
@@ -1260,7 +1264,7 @@ describe("WorldStore", () => {
 
 			const state = store.getState()
 			expect(state.sessions[0].messages[0].parts).toHaveLength(1)
-			expect(state.sessions[0].messages[0].parts[0].content).toBe("Hello World")
+			expect((state.sessions[0].messages[0].parts[0] as any).text).toBe("Hello World")
 		})
 
 		it("maintains sorted order by ID", () => {
@@ -1268,10 +1272,10 @@ describe("WorldStore", () => {
 			const now = Date.now()
 
 			const parts = [
-				{ id: "part-3", messageID: "msg-1", type: "text", content: "C" },
-				{ id: "part-1", messageID: "msg-1", type: "text", content: "A" },
-				{ id: "part-2", messageID: "msg-1", type: "text", content: "B" },
-			]
+				{ id: "part-3", sessionID: "ses-1", messageID: "msg-1", type: "text", text: "C" },
+				{ id: "part-1", sessionID: "ses-1", messageID: "msg-1", type: "text", text: "A" },
+				{ id: "part-2", sessionID: "ses-1", messageID: "msg-1", type: "text", text: "B" },
+			] as Part[]
 
 			for (const part of parts) {
 				store.upsertPart(part)
@@ -1370,10 +1374,11 @@ describe("WorldStore", () => {
 			// 4. User message part
 			store.upsertPart({
 				id: "part-user-1",
+				sessionID: "ses-123",
 				messageID: "msg-user-1",
 				type: "text",
-				content: "Hello AI",
-			})
+				text: "Hello AI",
+			} as Part)
 
 			// 5. Assistant message created (streaming starts)
 			store.upsertMessage({
@@ -1387,24 +1392,27 @@ describe("WorldStore", () => {
 			// 6. Assistant message part updates (streaming)
 			store.upsertPart({
 				id: "part-asst-1",
+				sessionID: "ses-123",
 				messageID: "msg-asst-1",
 				type: "text",
-				content: "Hello",
-			})
+				text: "Hello",
+			} as Part)
 
 			store.upsertPart({
 				id: "part-asst-1",
+				sessionID: "ses-123",
 				messageID: "msg-asst-1",
 				type: "text",
-				content: "Hello! How",
-			})
+				text: "Hello! How",
+			} as Part)
 
 			store.upsertPart({
 				id: "part-asst-1",
+				sessionID: "ses-123",
 				messageID: "msg-asst-1",
 				type: "text",
-				content: "Hello! How can I help you?",
-			})
+				text: "Hello! How can I help you?",
+			} as Part)
 
 			// 7. Message completed with tokens
 			store.upsertMessage({
@@ -1439,11 +1447,11 @@ describe("WorldStore", () => {
 
 			const userMsg = state.sessions[0].messages.find((m) => m.role === "user")
 			expect(userMsg?.parts).toHaveLength(1)
-			expect(userMsg?.parts[0].content).toBe("Hello AI")
+			expect((userMsg?.parts[0] as any).text).toBe("Hello AI")
 
 			const asstMsg = state.sessions[0].messages.find((m) => m.role === "assistant")
 			expect(asstMsg?.parts).toHaveLength(1)
-			expect(asstMsg?.parts[0].content).toBe("Hello! How can I help you?")
+			expect((asstMsg?.parts[0] as any).text).toBe("Hello! How can I help you?")
 			expect(asstMsg?.isStreaming).toBe(false)
 			expect(asstMsg?.tokens?.input).toBe(1000)
 
@@ -1540,8 +1548,9 @@ describe("effect-atom atoms", () => {
 			const part: Part = {
 				id: "part-1",
 				messageID: "msg-1",
-				type: "text",
-				content: "Hello",
+				sessionID: "ses-1",
+				type: "text" as const,
+				text: "Hello",
 			}
 
 			registry.set(partsAtom, new Map([["part-1", part]]))
@@ -1712,6 +1721,192 @@ describe("effect-atom atoms", () => {
 			expect(lastValue).not.toBeNull()
 			expect(lastValue!.size).toBe(1)
 			expect(lastValue!.get("ses-1")!.title).toBe("Test")
+		})
+	})
+
+	describe("worldStateAtom reference stability", () => {
+		it("returns same reference when underlying atoms have not changed", async () => {
+			const { worldStateAtom, Registry } = await import("./atoms.js")
+			const registry = Registry.make()
+
+			// Get initial world state
+			const state1 = registry.get(worldStateAtom)
+
+			// Get it again without changing any underlying atoms
+			const state2 = registry.get(worldStateAtom)
+
+			// Should be the SAME reference (not just equal values)
+			expect(state1).toBe(state2)
+		})
+
+		it("returns different reference only when underlying data changes", async () => {
+			const { worldStateAtom, sessionsAtom, Registry } = await import("./atoms.js")
+			const registry = Registry.make()
+			const now = Date.now()
+
+			// Get initial world state
+			const state1 = registry.get(worldStateAtom)
+
+			// Change underlying data
+			const sessionsMap = new Map<string, Session>([
+				[
+					"ses-1",
+					{
+						id: "ses-1",
+						title: "Test",
+						directory: "/test",
+						time: { created: now, updated: now },
+					},
+				],
+			])
+			registry.set(sessionsAtom, sessionsMap)
+
+			// Get world state after change
+			const state2 = registry.get(worldStateAtom)
+
+			// Should be DIFFERENT reference
+			expect(state1).not.toBe(state2)
+
+			// Get it again without changing data
+			const state3 = registry.get(worldStateAtom)
+
+			// Should be the SAME reference as state2
+			expect(state2).toBe(state3)
+		})
+
+		it("subscription callback receives same reference when no data changes", async () => {
+			const { worldStateAtom, Registry } = await import("./atoms.js")
+			const registry = Registry.make()
+
+			const receivedStates: WorldState[] = []
+
+			// Mount the atom to keep it alive
+			const cleanup = registry.mount(worldStateAtom)
+
+			// Subscribe to changes
+			const unsubscribe = registry.subscribe(worldStateAtom, (state) => {
+				receivedStates.push(state)
+			})
+
+			// Wait a bit to ensure no spurious updates
+			await new Promise((resolve) => setTimeout(resolve, 50))
+
+			// Should have received initial state only
+			expect(receivedStates.length).toBe(0) // Registry.subscribe doesn't fire immediately
+
+			// Manually get current state
+			const currentState = registry.get(worldStateAtom)
+			receivedStates.push(currentState)
+
+			// Wait again
+			await new Promise((resolve) => setTimeout(resolve, 50))
+
+			// Get state again
+			const nextState = registry.get(worldStateAtom)
+			receivedStates.push(nextState)
+
+			// Both states should be the SAME reference
+			expect(receivedStates[0]).toBe(receivedStates[1])
+
+			cleanup()
+			unsubscribe()
+		})
+
+		it("lastUpdated field does not change when no data changes", async () => {
+			const { worldStateAtom, Registry } = await import("./atoms.js")
+			const registry = Registry.make()
+
+			// Get initial state
+			const state1 = registry.get(worldStateAtom)
+			const lastUpdated1 = state1.lastUpdated
+
+			// Wait a bit
+			await new Promise((resolve) => setTimeout(resolve, 10))
+
+			// Get state again without changing any data
+			const state2 = registry.get(worldStateAtom)
+			const lastUpdated2 = state2.lastUpdated
+
+			// lastUpdated should be the SAME value
+			expect(lastUpdated1).toBe(lastUpdated2)
+
+			// And the objects should be the same reference
+			expect(state1).toBe(state2)
+		})
+
+		it("simulates useSyncExternalStore pattern - repeated getSnapshot calls", async () => {
+			const { worldStateAtom, Registry } = await import("./atoms.js")
+			const registry = Registry.make()
+
+			// Simulate useSyncExternalStore calling getSnapshot on every render
+			const snapshots: WorldState[] = []
+
+			// Mount to keep atom alive
+			const cleanup = registry.mount(worldStateAtom)
+
+			// Simulate 10 rapid "renders" (getSnapshot calls)
+			for (let i = 0; i < 10; i++) {
+				snapshots.push(registry.get(worldStateAtom))
+			}
+
+			// All snapshots should be the SAME reference
+			for (let i = 1; i < snapshots.length; i++) {
+				expect(snapshots[i]).toBe(snapshots[0])
+				expect(snapshots[i].lastUpdated).toBe(snapshots[0].lastUpdated)
+			}
+
+			cleanup()
+		})
+
+		it("lastUpdated is computed from most recent session activity", async () => {
+			const { worldStateAtom, sessionsAtom, Registry } = await import("./atoms.js")
+			const registry = Registry.make()
+			const now = Date.now()
+
+			// Add sessions with different update times
+			const sessionsMap = new Map<string, Session>([
+				[
+					"ses-1",
+					{
+						id: "ses-1",
+						title: "Old Session",
+						directory: "/test",
+						time: { created: now - 10000, updated: now - 10000 },
+					},
+				],
+				[
+					"ses-2",
+					{
+						id: "ses-2",
+						title: "Recent Session",
+						directory: "/test",
+						time: { created: now - 5000, updated: now - 1000 },
+					},
+				],
+			])
+
+			registry.set(sessionsAtom, sessionsMap)
+
+			const state = registry.get(worldStateAtom)
+
+			// lastUpdated should match the most recent session's update time
+			// (which is ses-2's updated time: now - 1000)
+			expect(state.lastUpdated).toBe(now - 1000)
+
+			// Get it again - should be stable
+			const state2 = registry.get(worldStateAtom)
+			expect(state2.lastUpdated).toBe(state.lastUpdated)
+			expect(state2).toBe(state) // Same reference
+		})
+
+		it("lastUpdated is 0 when no sessions exist", async () => {
+			const { worldStateAtom, Registry } = await import("./atoms.js")
+			const registry = Registry.make()
+
+			const state = registry.get(worldStateAtom)
+
+			// No sessions = lastUpdated should be 0
+			expect(state.lastUpdated).toBe(0)
 		})
 	})
 })

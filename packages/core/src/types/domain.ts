@@ -1,60 +1,38 @@
 /**
  * Domain types for OpenCode entities
  *
- * Provides backward-compatible loose types while transitioning to strict SDK types.
- * New code should use SDK types directly from ./sdk.ts
+ * These are LOOSE types compatible with Effect Schema types.
+ * Effect Schema validates structure; these provide wider compatibility.
  */
 
-// Import SDK types for reference
-import type { Session as SDKSession, Message as SDKMessage, Part as SDKPart } from "./sdk.js"
-
-/**
- * Backward-compatible Session type (loose)
- * For strict typing, use SDKSession from ./sdk.ts
- */
-export type Session = {
-	id: string
-	title: string
-	directory: string
-	parentID?: string
-	projectID?: string
-	version?: string | number // SDK uses string, old code used number
-	time: {
-		created: number
-		updated: number
-		archived?: number
-	}
-	summary?: {
-		additions: number
-		deletions: number
-		files: number
-		diffs?: unknown[]
-	}
-	[key: string]: unknown
-}
+import type {
+	SessionInfo as SSESessionInfo,
+	MessageInfo as SSEMessageInfo,
+	Part as SSEPart,
+} from "../sse/schemas.js"
 
 /**
- * Backward-compatible Message type (loose)
- * For strict typing, use SDKMessage from ./sdk.ts
+ * Session - Compatible with Effect Schema SessionInfo
  */
-export type Message = {
-	id: string
-	sessionID: string
-	role: string
-	parentID?: string
-	time?: { created: number; completed?: number }
-	finish?: string
-	tokens?: {
-		input: number
-		output: number
-		reasoning?: number
-		cache?: {
-			read: number
-			write: number
-		}
+export type Session = SSESessionInfo
+
+/**
+ * Message - Domain type with typed refinements
+ *
+ * Compatible with Effect Schema MessageInfo but provides typed access to
+ * `tokens` and `model` fields (which are `unknown` in MessageInfo).
+ */
+export interface Message {
+	readonly id: string
+	readonly sessionID: string
+	readonly role: string
+	readonly time: {
+		readonly created: number
+		readonly completed?: number
 	}
-	agent?: string
-	model?: {
+	readonly summary?: unknown
+	readonly agent?: string
+	readonly model?: {
 		name?: string
 		providerID?: string
 		modelID?: string
@@ -63,44 +41,36 @@ export type Message = {
 			output: number
 		}
 	}
-	summary?: unknown
-	error?: unknown
-	system?: string
-	tools?: unknown
-	mode?: string
-	providerID?: string
-	modelID?: string
-	[key: string]: unknown
+	readonly system?: unknown
+	readonly tools?: unknown
+	readonly variant?: unknown
+	readonly error?: unknown
+	readonly parentID?: string
+	readonly modelID?: string
+	readonly providerID?: string
+	readonly mode?: string
+	readonly path?: unknown
+	readonly cost?: unknown
+	readonly tokens?: {
+		input: number
+		output: number
+		reasoning?: number
+		cache?: {
+			read: number
+			write: number
+		}
+	}
+	readonly finish?: string
 }
 
 /**
- * Backward-compatible Part type (loose)
- * For strict typing, use SDKPart from ./sdk.ts
- *
- * sessionID made optional for test compatibility (real parts always have it)
+ * Part - Compatible with Effect Schema Part
  */
-export type Part = {
-	id: string
-	sessionID?: string // Optional for test mocks
-	messageID: string
-	type: string
-	content?: string
-	text?: string
-	tool?: string
-	state?: {
-		status?: string
-		[key: string]: unknown
-	}
-	time?: {
-		start: number
-		end?: number
-	}
-	[key: string]: unknown
-}
+export type Part = SSEPart
 
 /**
  * Backward-compatible SessionStatus type (loose string union)
- * For strict typing, use SessionStatus from ./sdk.ts (object discriminated union)
+ * Effect Schema uses object discriminated union - this is for consumers that need strings
  */
 export type SessionStatusCompat = "pending" | "running" | "completed" | "error" | "idle"
 

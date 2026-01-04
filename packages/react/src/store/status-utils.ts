@@ -31,9 +31,7 @@ interface OpencodeState {
 					messageID: string
 					type: string
 					tool?: string
-					state?: {
-						status: string
-					}
+					state?: unknown // Flexible to accept Core Part state shapes (different per Part type)
 				}>
 			>
 		}

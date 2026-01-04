@@ -1,4 +1,4 @@
-import { createClientSSR, globalClientSSR } from "@opencode-vibe/core/client"
+import { createClientSSR, globalClientSSR } from "@opencode-vibe/core/client/server"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { OpenCodeLogo } from "@/components/opencode-logo"
 import { ProjectsList } from "./projects-list"

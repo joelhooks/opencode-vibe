@@ -30,7 +30,10 @@ Turborepo monorepo transitioning from SolidJS to Next.js 16+ with React Server C
 
 **Architecture Philosophy:**
 - **Core owns computation, React binds UI** - Smart boundary pattern (ADR-016)
-- **World Stream is THE API** - Push-based reactive state via `createWorldStream()` (ADR-018)
+- **World Stream is THE source of truth** - Push-based reactive state via `createWorldStream()` (ADR-018)
+  - React hooks delegate to World Stream: `useWorld()`, `useWorldSession()`, `useWorldSessionList()`
+  - Zustand SSE handlers DISABLED for core data (sessions, messages, parts flow through World Stream)
+  - Zustand preserved ONLY for UI-local state: ready flag, todos, model limits
 - **Router is DELETED** - 4,377 LOC removed, it was solving the wrong problem
 
 **Why Next.js 16?**
@@ -376,9 +379,9 @@ const world = await stream.getSnapshot()
 - `format.relativeTime()`, `format.tokens()` - Formatting utils
 
 **What React provides:**
-- UI binding via hooks (`useWorld()`, `useSession(id)`)
+- UI binding via hooks (`useWorld()`, `useWorldSession(id)`, `useWorldSessionList()`)
 - Never imports Effect types
-- Zustand only for UI-local state (selected session, flags)
+- Zustand preserved ONLY for UI-local state (ready flag, todos, model limits - NOT core data)
 
 ### OpenAPI SDK Codegen
 

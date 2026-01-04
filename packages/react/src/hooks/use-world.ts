@@ -124,6 +124,26 @@ export function useWorld(): WorldState {
 }
 
 /**
+ * Get the global world registry for external event routing
+ * Used by layout-client.tsx to wire multiServerSSE events to event-router.ts
+ *
+ * Returns null if stream hasn't been initialized yet.
+ *
+ * @example
+ * ```typescript
+ * const registry = getWorldRegistry()
+ * if (registry) {
+ *   routeEvent(event, registry, port)
+ * }
+ * ```
+ */
+export function getWorldRegistry() {
+	if (!globalStream) return null
+	// Safe cast: createWorldStream returns MergedStreamHandle with getRegistry()
+	return (globalStream as any).getRegistry()
+}
+
+/**
  * Reset the singleton stream (TEST ONLY)
  * @internal
  */

@@ -1,10 +1,14 @@
 # ADR 018: Reactive World Stream Architecture
 
-**Status:** Proposed  
-**Date:** 2026-01-01  
+**Status:** ✅ Implemented  
+**Date:** 2026-01-01 (Completed: 2026-01-04)  
 **Deciders:** Joel Hooks  
 **Affected Components:** `@opencode-vibe/core`, `@opencode-vibe/react`, Web App, TUI, CLI  
 **Related ADRs:** ADR-017 (Session Management in Core Layer), ADR-016 (Core Layer Responsibility), ADR-015 (Event Architecture Simplification)
+
+> **Implementation Note (2026-01-04)**: World Stream is now THE source of truth for reactive state.
+> React hooks (`useWorld()`, `useWorldSession()`, `useWorldSessionList()`) delegate to World Stream.
+> Zustand SSE handlers disabled for core data (sessions, messages, parts). Zustand preserved only for UI-local state (ready flags, todos, model limits).
 
 ---
 

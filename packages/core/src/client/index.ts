@@ -4,6 +4,9 @@
  * Client routing utilities and SDK factory for OpenCode
  *
  * Provides routing logic and SDK client factory.
+ *
+ * For SSR (Server Components), use:
+ * import { createClientSSR } from "@opencode-vibe/core/client/server"
  */
 
 export {
@@ -11,8 +14,6 @@ export {
 	OPENCODE_URL,
 	createClient,
 	globalClient,
-	createClientSSR,
-	globalClientSSR,
 	type RoutingContext,
 	type OpencodeClient,
 } from "./client.js"

@@ -1,13 +1,19 @@
 # ADR 007: Nuclear Migration Plan - Zustand Store Deletion
 
-**Status:** ✅ COMPLETE  
-**Date:** 2025-12-29 (Completed: 2025-12-30)  
+**Status:** ✅ COMPLETE (Superseded by ADR-018)  
+**Date:** 2025-12-29 (Completed: 2025-12-30, Superseded: 2026-01-04)  
 **Context:** Post-Effect migration, 46 files changed, 3556 deletions, 677 additions
 
 > **Historical Note (2026-01-01)**: This ADR documents the Zustand store removal (commit 8e40992).
 > References to `useDeferredValue` throughout this document describe the OLD architecture.
 > Current implementation uses jotai atoms with direct Core API calls - no useDeferredValue needed.
 > See `docs/audits/USEDEFERRED_VALUE_AUDIT.md` for details.
+
+> **Migration Complete (2026-01-04)**: Zustand elimination is complete. React hooks now delegate to **World Stream** (ADR-018).
+> - `useWorld()`, `useWorldSession()`, `useWorldSessionList()` are the primary APIs
+> - Zustand SSE handlers disabled for sessions, messages, parts (core data flows through World Stream)
+> - Zustand preserved ONLY for UI-local state: ready flag, todos, model limits
+> - See ADR-018 for the push-based reactive architecture that replaced the pull-based Zustand pattern
 
 ## Definition of Done
 

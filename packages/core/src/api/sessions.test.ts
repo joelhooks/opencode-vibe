@@ -327,9 +327,9 @@ describe("getStatus", () => {
 		const parts: Part[] = [
 			{
 				id: "part_1",
+				sessionID: "ses_1",
 				messageID: "msg_1",
 				type: "tool",
-				content: "",
 				tool: "task",
 				state: { status: "running" },
 			},
@@ -356,9 +356,9 @@ describe("getStatus", () => {
 		const parts: Part[] = [
 			{
 				id: "part_1",
+				sessionID: "ses_1",
 				messageID: "msg_1",
 				type: "tool",
-				content: "",
 				tool: "task",
 				state: { status: "running" },
 			},
