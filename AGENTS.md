@@ -12,6 +12,16 @@ Task(subagent_type="explore", description="Debug via Chrome DevTools", prompt=".
 
 ---
 
+## ⚠️ STOP: No "instances" Directory
+
+**OpenCode does NOT use `~/.local/state/opencode/instances/` for server discovery.**
+
+This path is a hallucination. Don't check it, don't reference it, it doesn't exist.
+
+Server discovery uses the SDK's discovery service which scans for running processes, NOT a filesystem directory.
+
+---
+
 ## Project Overview
 
 **opencode-next** - Next.js 16 rebuild of OpenCode web application.
