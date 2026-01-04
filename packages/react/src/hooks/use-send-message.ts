@@ -4,6 +4,7 @@ import { prompt } from "@opencode-vibe/core/api"
 import { useCommands } from "./use-commands"
 import { sessions } from "@opencode-vibe/core/api"
 import { useSessionStatus } from "./internal/use-session-status"
+import { multiServerSSE } from "@opencode-vibe/core/sse"
 
 /**
  * Result of parsing a prompt for slash commands
@@ -145,6 +146,23 @@ export function useSendMessage({
 	const running = status === "running"
 
 	/**
+	 * Wait for multiServerSSE discovery to complete before sending
+	 * This prevents routing to the wrong port (e.g., default 4056 instead of actual port)
+	 *
+	 * @param maxWaitMs - Maximum time to wait for discovery (default: 10s)
+	 * @returns true if discovery completed, false if timed out
+	 */
+	const waitForDiscovery = useCallback(async (maxWaitMs = 10000): Promise<boolean> => {
+		const startTime = Date.now()
+
+		while (!multiServerSSE.isDiscoveryComplete() && Date.now() - startTime < maxWaitMs) {
+			await new Promise((resolve) => setTimeout(resolve, 100))
+		}
+
+		return multiServerSSE.isDiscoveryComplete()
+	}, [])
+
+	/**
 	 * Process a single message via router caller.
 	 *
 	 * Routes messages based on content:
@@ -152,14 +170,20 @@ export function useSendMessage({
 	 * - Builtin slash commands → skip (handled client-side)
 	 * - Regular prompts → session.promptAsync route
 	 *
-	 * NOTE: Caller uses the SDK client from context which picks up the latest
-	 * server discovery from multiServerSSE. The session→port mapping
-	 * updates dynamically as we receive SSE events.
+	 * NOTE: Waits for multiServerSSE discovery to complete before sending
+	 * to ensure correct port routing. Without this, createClient falls back
+	 * to DEFAULT_PROXY_URL which may be the wrong port.
 	 *
 	 * @returns true if message was processed, false if skipped (builtin command)
 	 */
 	const processMessage = useCallback(
 		async (parts: Prompt, model?: ModelSelection): Promise<boolean> => {
+			// Wait for discovery to complete (max 10s)
+			const discoveryComplete = await waitForDiscovery()
+			if (!discoveryComplete) {
+				throw new Error("Server discovery timed out. Is the OpenCode backend running?")
+			}
+
 			// Check if this is a slash command
 			const parsed = parseSlashCommand(parts)
 
@@ -179,7 +203,7 @@ export function useSendMessage({
 			await sessions.promptAsync(sessionId, apiParts, model, directory)
 			return true
 		},
-		[sessionId, directory, parseSlashCommand],
+		[sessionId, directory, parseSlashCommand, waitForDiscovery],
 	)
 
 	// Process next message from queue if session is idle

@@ -22,6 +22,7 @@ import {
 	Context,
 	Layer,
 	Exit,
+	Either,
 } from "effect"
 import { createParser, type EventSourceParser } from "eventsource-parser"
 import type { Message, Part, Session } from "../types/domain.js"
@@ -42,6 +43,9 @@ import {
 import type { SSEEventInfo, Instance } from "./types.js"
 import { WorldMetrics } from "./metrics.js"
 import type { Project } from "../types/sdk.js"
+import { parseSSEEvent } from "../sse/parse.js"
+import type { SSEEvent as ParsedSSEEvent } from "../sse/schemas.js"
+import { routeEvent } from "./event-router.js"
 
 // ============================================================================
 // Types
@@ -108,13 +112,14 @@ function getApiBaseUrl(port: number): string {
 
 /**
  * Discover servers via browser proxy API
- * Fetches /api/opencode-servers which returns discovered servers
+ * Fetches /api/opencode/servers which returns discovered servers
  */
 function discoverServersFromProxy(): Effect.Effect<DiscoveredServer[], Error> {
 	return Effect.tryPromise({
 		try: async () => {
-			const response = await fetch("/api/opencode-servers")
+			const response = await fetch("/api/opencode/servers")
 			if (!response.ok) {
+				console.warn(`[WorldSSE] Discovery failed: ${response.status}`)
 				return []
 			}
 			const servers = (await response.json()) as Array<{
@@ -141,9 +146,21 @@ function discoverServersFromProxy(): Effect.Effect<DiscoveredServer[], Error> {
  *
  * In browser: fetches /api/opencode-servers (Next.js proxy)
  * In CLI/server: uses lsof to find bun/opencode processes
+ *
+ * SSR: Returns empty array (no discovery during server-side rendering)
  */
 export function discoverServers(): Effect.Effect<DiscoveredServer[], Error> {
 	return Effect.gen(function* () {
+		// SSR guard - skip discovery during server-side rendering
+		// Discovery requires either browser fetch API or Node.js child_process
+		// During Next.js SSR, window is undefined but we're in Node context
+		// HOWEVER: fetch calls to proxy routes will fail (routes don't exist yet)
+		// AND: child_process.exec with lsof causes timeouts/aborts
+		if (typeof window === "undefined") {
+			console.debug("[WorldSSE] Skipping discovery during SSR")
+			return []
+		}
+
 		// Browser: use proxy API for discovery
 		if (isBrowser()) {
 			return yield* discoverServersFromProxy()
@@ -207,9 +224,18 @@ export function discoverServers(): Effect.Effect<DiscoveredServer[], Error> {
 
 /**
  * Verify a port is an OpenCode server by checking /project/current
+ *
+ * SSR: Returns null (no verification during server-side rendering)
  */
 function verifyServer(port: number, pid: number): Effect.Effect<DiscoveredServer | null, never> {
 	return Effect.gen(function* () {
+		// SSR guard - skip verification during server-side rendering
+		// AbortController + fetch causes timeouts during Next.js SSR
+		if (typeof window === "undefined") {
+			console.debug("[WorldSSE] Skipping server verification during SSR")
+			return null
+		}
+
 		const controller = new AbortController()
 		const timeoutId = setTimeout(() => controller.abort(), 500)
 
@@ -626,147 +652,32 @@ export class WorldSSE {
 	/**
 	 * Handle incoming SSE event
 	 *
-	 * CRITICAL: Maps sessionID to Instance for routing.
-	 * When session events arrive, we extract the session directory and
-	 * map it to the Instance that sent the event (this connection's port).
+	 * Parses event through Effect Schema, then delegates to event-router.
+	 * Event router handles all atom updates and session-to-instance mapping.
 	 */
 	private handleEvent(event: SSEEvent, sourcePort: number): void {
-		const { type, properties } = event
+		// Parse event through Effect Schema
+		const parseResult = parseSSEEvent(event)
+
+		// Skip invalid events (malformed data from SSE stream)
+		if (Either.isLeft(parseResult)) {
+			// Silently skip unknown events for now (e.g., lsp.client.diagnostics)
+			// TODO: Add schemas for these events and route them properly
+			// The World Stream should eventually handle ALL SSE events
+			return
+		}
+
+		const parsed = parseResult.right
 
 		// Call the event callback for logging/debugging
-		// Add source tag for multi-source scenarios
 		this.config.onEvent({
 			source: "sse",
-			type,
-			properties,
+			type: parsed.type,
+			properties: parsed.properties,
 		})
 
-		switch (type) {
-			case "session.created":
-			case "session.updated": {
-				const session = properties as unknown as Session
-				if (session?.id) {
-					// Upsert session in sessionsAtom (Map)
-					const sessions = this.registry.get(sessionsAtom)
-					const updated = new Map(sessions)
-					updated.set(session.id, session)
-					this.registry.set(sessionsAtom, updated)
-
-					// Map session to instance for routing
-					// Find instance by port from instancesAtom
-					const instances = this.registry.get(instancesAtom)
-					const instance = instances.get(sourcePort)
-					if (instance) {
-						const mapping = this.registry.get(sessionToInstancePortAtom)
-						const updatedMapping = new Map(mapping)
-						updatedMapping.set(session.id, instance.port)
-						this.registry.set(sessionToInstancePortAtom, updatedMapping)
-					}
-				}
-				break
-			}
-
-			case "message.created":
-			case "message.updated": {
-				const message = properties as unknown as Message
-				if (message?.id) {
-					// Upsert message in messagesAtom (Map)
-					const messages = this.registry.get(messagesAtom)
-					const updated = new Map(messages)
-					updated.set(message.id, message)
-					this.registry.set(messagesAtom, updated)
-
-					// CRITICAL: Receiving message events = session is active
-					// Mark as "running" since we're getting live data
-					const sessionId = message.sessionID
-					if (sessionId) {
-						const statuses = this.registry.get(statusAtom)
-						const updatedStatuses = new Map(statuses)
-						updatedStatuses.set(sessionId, "running")
-						this.registry.set(statusAtom, updatedStatuses)
-
-						const instances = this.registry.get(instancesAtom)
-						const instance = instances.get(sourcePort)
-						if (instance) {
-							const mapping = this.registry.get(sessionToInstancePortAtom)
-							const updatedMapping = new Map(mapping)
-							updatedMapping.set(sessionId, instance.port)
-							this.registry.set(sessionToInstancePortAtom, updatedMapping)
-						}
-					}
-				}
-				break
-			}
-
-			case "part.created":
-			case "part.updated":
-			case "message.part.updated": {
-				// Handle both part.* and message.part.updated event types
-				// message.part.updated wraps part data in a "part" property
-				const partData =
-					type === "message.part.updated"
-						? (properties as { part?: Part }).part
-						: (properties as unknown as Part)
-
-				if (partData?.id) {
-					// Upsert part in partsAtom (Map)
-					const parts = this.registry.get(partsAtom)
-					const updated = new Map(parts)
-					updated.set(partData.id, partData)
-					this.registry.set(partsAtom, updated)
-
-					// Map session to instance via part → messageID → sessionID lookup
-					// Get message to find sessionID
-					const messages = this.registry.get(messagesAtom)
-					const message = messages.get(partData.messageID)
-					const sessionId = message?.sessionID
-
-					// CRITICAL: Receiving part events = session is DEFINITELY running
-					// This is a STRONG SIGNAL - we're getting live streaming content
-					if (sessionId) {
-						const statuses = this.registry.get(statusAtom)
-						const updatedStatuses = new Map(statuses)
-						updatedStatuses.set(sessionId, "running")
-						this.registry.set(statusAtom, updatedStatuses)
-
-						const instances = this.registry.get(instancesAtom)
-						const instance = instances.get(sourcePort)
-						if (instance) {
-							const mapping = this.registry.get(sessionToInstancePortAtom)
-							const updatedMapping = new Map(mapping)
-							updatedMapping.set(sessionId, instance.port)
-							this.registry.set(sessionToInstancePortAtom, updatedMapping)
-						}
-					}
-				}
-				break
-			}
-
-			case "session.status": {
-				const { sessionID, status } = properties as {
-					sessionID?: string
-					status?: SessionStatus
-				}
-				if (sessionID && status) {
-					// Update status in statusAtom (Map)
-					const statuses = this.registry.get(statusAtom)
-					const updated = new Map(statuses)
-					updated.set(sessionID, status)
-					this.registry.set(statusAtom, updated)
-
-					// Map session to instance for status events too
-					const instances = this.registry.get(instancesAtom)
-					const instance = instances.get(sourcePort)
-					if (instance) {
-						const mapping = this.registry.get(sessionToInstancePortAtom)
-						const updatedMapping = new Map(mapping)
-						updatedMapping.set(sessionID, instance.port)
-						this.registry.set(sessionToInstancePortAtom, updatedMapping)
-					}
-				}
-				break
-			}
-		}
+		// Delegate to event router for atom updates
+		routeEvent(parsed, this.registry, sourcePort)
 	}
 }
 
