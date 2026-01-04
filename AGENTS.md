@@ -83,6 +83,27 @@ bun run test:coverage     # Runs: vitest run --coverage
 
 **CRITICAL:** 
 - Always `bun run typecheck` from repo root before committing
+
+### Debugging CLI Commands
+
+**Use `--debug` flag** to see what's happening:
+
+```bash
+# See connection status, instance discovery, session loading
+cd apps/swarm-cli && bun run src/main.ts list --once --debug
+
+# Discovery takes ~10 seconds - be patient!
+# Output shows: status=discovering → connecting → connected
+```
+
+**Discovery uses `lsof`** to find running OpenCode servers:
+```bash
+# What discovery actually runs:
+lsof -iTCP -sTCP:LISTEN -P -n | grep -E 'bun|opencode'
+
+# Then verifies each port with:
+curl http://127.0.0.1:{port}/project/current
+```
 - Never use `bun test` directly - Vitest has proper isolation, Bun test leaks state
 
 ---

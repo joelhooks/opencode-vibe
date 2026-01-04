@@ -21,6 +21,7 @@ import { formatProjectList } from "../formatters/list-formatter.js"
 interface ListOptions {
 	once?: boolean // Render once and exit (for agents)
 	limit?: number // Maximum sessions per project (default 10)
+	debug?: boolean // Show debug output (connection status, instance count, etc.)
 }
 
 /**
@@ -34,6 +35,9 @@ function parseArgs(args: string[]): ListOptions {
 		switch (arg) {
 			case "--once":
 				options.once = true
+				break
+			case "--debug":
+				options.debug = true
 				break
 			case "--limit": {
 				const limitValue = args[i + 1]
@@ -69,6 +73,7 @@ Usage:
 Options:
   --once         Render once and exit (for agents)
   --limit N      Max sessions per project (default: 10)
+  --debug        Show debug info (connection status, discovery, etc.)
   --help, -h     Show this message
 
 Modes:
@@ -205,6 +210,17 @@ export async function run(context: CommandContext): Promise<void> {
 
 			// Always store latest world for periodic refresh
 			latestWorld = world
+
+			// Debug output
+			if (options.debug) {
+				const instanceInfo = world.instances.map((i) => `${i.port}:${i.status}`).join(", ")
+				console.error(
+					`[debug] status=${world.connectionStatus} instances=${world.instances.length} sessions=${world.sessions.length}`,
+				)
+				if (world.instances.length > 0) {
+					console.error(`[debug] instances: ${instanceInfo}`)
+				}
+			}
 
 			const now = Date.now()
 
