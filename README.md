@@ -29,18 +29,6 @@ Next.js 16 rebuild of the OpenCode web application. Real-time chat UI with strea
 
 ---
 
-## What's Here
-
-**Monorepo structure:**
-
-- **`apps/web/`** - Next.js 16 web application (App Router, RSC, Tailwind)
-- **`apps/swarm-cli/`** - CLI for visualizing world state across servers
-- **`packages/core/`** - World stream, atoms, Effect services, types
-- **`packages/react/`** - React bindings (hooks, providers, store)
-- **`docs/`** - Architecture Decision Records and implementation guides
-
----
-
 ## Features
 
 - **World stream architecture** - Push-based reactive state via `createWorldStream()`
@@ -51,29 +39,6 @@ Next.js 16 rebuild of the OpenCode web application. Real-time chat UI with strea
 - **Slash commands** - Type `/` for actions like `/fix`, `/test`, `/refactor`
 - **File references** - Type `@` to fuzzy-search and attach files as context
 - **Catppuccin theme** - Latte (light) / Mocha (dark) with proper syntax highlighting
-
----
-
-## Development
-
-**Available scripts:**
-
-```bash
-# Development
-bun dev                 # Start Next.js dev server (port 8423 = VIBE)
-bun build               # Production build
-
-# Code quality
-bun run typecheck       # TypeScript check (via turbo, checks all packages)
-bun lint                # Run oxlint
-bun format              # Format with Biome
-
-# Testing
-bun test                # Run tests (Vitest)
-bun test --watch        # Watch mode
-```
-
-**CRITICAL:** Always run `bun run typecheck` from repo root before committing. Turbo checks the full monorepo.
 
 ---
 
@@ -93,28 +58,10 @@ bun test --watch        # Watch mode
 
 ---
 
-## Documentation
-
-- **`apps/web/README.md`** - Web app architecture and patterns
-- **`packages/core/README.md`** - Core SDK and world stream documentation
-- **`packages/react/README.md`** - React hooks and providers
-- **`docs/adr/`** - Architecture Decision Records
-  - ADR-016: Core Layer Responsibility (Core owns computation, React binds UI)
-  - ADR-018: Reactive World Stream (`createWorldStream()` is THE API)
-- **`docs/guides/`** - Implementation guides (SSE sync, mobile, subagents)
-- **`AGENTS.md`** - AI agent conventions and development patterns
-
----
-
 ## Contributing
 
-1. Use Bun (not npm/pnpm)
-2. Follow TDD: RED → GREEN → REFACTOR
-3. Run `bun format` before committing
-4. Check `bun lint` and `bun run typecheck` pass
-
----
+See **[CONTRIBUTING.md](CONTRIBUTING.md)** for development workflow, architecture docs, and project structure.
 
 ## License
 
-MIT
+This project is licensed under the MIT License - see the **[LICENSE](LICENSE)** file for details.
