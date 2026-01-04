@@ -4,9 +4,15 @@
  * Provides routing logic and SDK client factory for OpenCode.
  */
 
+import { Effect } from "effect"
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk/client"
-import { getServerForDirectory, getServerForSession, type ServerInfo } from "../discovery/index.js"
-import { multiServerSSE } from "../sse/multi-server-sse.js"
+import {
+	Discovery,
+	DiscoveryBrowserLive,
+	getServerForDirectory,
+	getServerForSession,
+	type ServerInfo,
+} from "../discovery/index.js"
 
 export type { OpencodeClient }
 
@@ -95,34 +101,52 @@ export function getClientUrl(
 }
 
 /**
- * Create an OpenCode SDK client instance with smart routing
+ * Helper to run Effect programs with Discovery layer
  *
- * Routes to the server that owns the session (if known),
- * otherwise falls back to directory-based routing, then default server.
+ * Provides DiscoveryBrowserLive layer by default.
+ * For SSR/Node.js, provide DiscoveryNodeLive explicitly.
  *
- * Uses multiServerSSE for routing context (server discovery + session cache).
+ * @example
+ * ```ts
+ * const servers = await runWithDiscovery(
+ *   Effect.gen(function* () {
+ *     const discovery = yield* Discovery
+ *     return yield* discovery.discover()
+ *   })
+ * )
+ * ```
+ */
+export const runWithDiscovery = <A>(effect: Effect.Effect<A, never, Discovery>) =>
+	Effect.runPromise(effect.pipe(Effect.provide(DiscoveryBrowserLive)))
+
+/**
+ * Create an OpenCode SDK client instance with proxy URL routing
  *
- * @param directory - Optional project directory for scoping requests
- * @param sessionId - Optional session ID for session-specific routing
+ * Always routes to the Next.js API proxy (`/api/opencode/{port}`), which handles
+ * server discovery and routing on the backend. This ensures browser-safe operation
+ * without needing async discovery in the client factory.
+ *
+ * For advanced routing with Discovery service, use `getClientUrl()` with routing context.
+ *
+ * @param directory - Optional project directory for scoping requests (passed via x-opencode-directory header)
+ * @param sessionId - Optional session ID for session-specific routing (unused - for future use)
  * @returns Configured OpencodeClient with all namespaces
  *
  * @example
  * ```ts
+ * // Basic usage (routes via proxy)
  * const client = createClient()
+ * const sessions = await client.session.list()
+ *
+ * // With directory scoping
+ * const client = createClient("/path/to/project")
  * const sessions = await client.session.list()
  * ```
  */
 export function createClient(directory?: string, sessionId?: string): OpencodeClient {
-	// Priority: session-specific routing > directory routing > default
-	let discoveredUrl: string | undefined
-
-	if (sessionId && directory) {
-		discoveredUrl = multiServerSSE.getBaseUrlForSession(sessionId, directory)
-	} else if (directory) {
-		discoveredUrl = multiServerSSE.getBaseUrlForDirectory(directory)
-	}
-
-	const serverUrl = discoveredUrl ?? DEFAULT_PROXY_URL
+	// Always use proxy URL for browser-safe operation
+	// The Next.js API route handles server discovery and routing
+	const serverUrl = DEFAULT_PROXY_URL
 
 	return createOpencodeClient({
 		baseUrl: serverUrl,
@@ -135,6 +159,3 @@ export function createClient(directory?: string, sessionId?: string): OpencodeCl
  * Use createClient(directory) for project-scoped operations
  */
 export const globalClient = createClient()
-
-// NOTE: For SSR client with Node.js discovery, use:
-// import { createClientSSR, globalClientSSR } from "@opencode-vibe/core/client/server"

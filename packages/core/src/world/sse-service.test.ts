@@ -9,6 +9,7 @@ import { describe, expect, it, beforeEach } from "vitest"
 import { Effect, Layer } from "effect"
 import { SSEService, SSEServiceLive } from "./sse.js"
 import { Registry, connectionStatusAtom } from "./atoms.js"
+import { Discovery, type DiscoveredServer } from "../discovery/index.js"
 
 describe("SSEService - Effect.Service Pattern", () => {
 	let registry: Registry.Registry
@@ -94,5 +95,56 @@ describe("SSEService - Effect.Service Pattern", () => {
 				Effect.provide(SSEServiceLive(registry, { serverUrl: "http://localhost:9999" })),
 			),
 		)
+	})
+
+	it("composes with custom Discovery layer", async () => {
+		// RED: This test should fail until we add discoveryLayer to WorldSSEConfig
+		// and wire Discovery service into WorldSSE
+
+		// Create mock Discovery layer that returns test servers
+		const mockServers: DiscoveredServer[] = [
+			{ port: 1999, pid: 100, directory: "/test/project1" },
+			{ port: 2000, pid: 200, directory: "/test/project2" },
+		]
+
+		const MockDiscoveryLive = Layer.succeed(Discovery, {
+			_tag: "Discovery" as const,
+			discover: () => Effect.succeed(mockServers),
+		})
+
+		const program = Effect.gen(function* () {
+			const service = yield* SSEService
+			yield* service.start()
+
+			// Wait for discovery to run
+			yield* Effect.sleep(100)
+
+			yield* service.stop()
+		})
+
+		await Effect.runPromise(
+			program.pipe(
+				Effect.provide(
+					SSEServiceLive(registry, {
+						discoveryLayer: MockDiscoveryLive,
+					}),
+				),
+			),
+		)
+	})
+
+	it("uses DiscoveryBrowserLive by default when no discoveryLayer provided", async () => {
+		// RED: This should pass once we wire default Discovery layer
+
+		const program = Effect.gen(function* () {
+			const service = yield* SSEService
+			yield* service.start()
+
+			// Default discovery should be used (DiscoveryBrowserLive)
+			// This test verifies the service starts without errors
+			yield* service.stop()
+		})
+
+		await Effect.runPromise(program.pipe(Effect.provide(SSEServiceLive(registry))))
 	})
 })

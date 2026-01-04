@@ -143,63 +143,10 @@ function effectAllLimit<A>(effects: Effect.Effect<A>[], limit: number): Effect.E
 }
 
 /**
- * Node.js Discovery Service Implementation
- *
- * Uses lsof to discover running OpenCode servers by scanning for
- * bun/opencode processes listening on TCP ports.
- */
-export class DiscoveryNode extends Effect.Service<DiscoveryNode>()("DiscoveryNode", {
-	sync: () => ({
-		discover: (options?: DiscoveryOptions): Effect.Effect<DiscoveredServer[]> =>
-			Effect.gen(function* () {
-				// Find all listening TCP ports for bun/opencode processes
-				const execResult = yield* Effect.tryPromise(() =>
-					execAsync(
-						`lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | grep -E 'bun|opencode' | awk '{print $2, $9}'`,
-						{ timeout: 2000 },
-					),
-				).pipe(
-					// lsof returns exit code 1 when grep finds no matches - that's OK
-					Effect.catchAll((error: any) => {
-						if (error.stdout !== undefined) {
-							return Effect.succeed({ stdout: error.stdout || "" })
-						}
-						return Effect.fail(error)
-					}),
-				)
-
-				const stdout = execResult.stdout
-
-				// Parse candidates
-				const candidates: CandidatePort[] = []
-				const seen = new Set<number>()
-
-				for (const line of stdout.trim().split("\n")) {
-					if (!line) continue
-					const [pid, address] = line.split(" ")
-					const portMatch = address?.match(/:(\d+)$/)
-					if (!portMatch) continue
-
-					const port = parseInt(portMatch[1], 10)
-					if (seen.has(port)) continue
-					seen.add(port)
-
-					candidates.push({ port, pid: parseInt(pid, 10) })
-				}
-
-				// Verify candidates with limited concurrency (max 5 at a time)
-				const tasks = candidates.map((c) => verifyOpencodeServer(c, options))
-				const results = yield* effectAllLimit(tasks, 5)
-				return results.filter((s): s is DiscoveredServer => s !== null)
-			}).pipe(
-				// Graceful degradation - discovery failures return empty array
-				Effect.catchAll(() => Effect.succeed([])),
-			),
-	}),
-}) {}
-
-/**
  * Node.js Discovery Layer
+ *
+ * Provides Discovery service using lsof for process scanning.
+ * Use in Node.js/CLI environments.
  *
  * USAGE:
  * ```typescript
@@ -214,4 +161,54 @@ export class DiscoveryNode extends Effect.Service<DiscoveryNode>()("DiscoveryNod
  * Effect.runPromise(program.pipe(Effect.provide(DiscoveryNodeLive)))
  * ```
  */
-export const DiscoveryNodeLive = Layer.succeed(Discovery, new DiscoveryNode())
+export const DiscoveryNodeLive: Layer.Layer<Discovery> = Layer.succeed(Discovery, {
+	_tag: "Discovery" as const,
+	/**
+	 * Discover running OpenCode servers using lsof
+	 */
+	discover: (options?: DiscoveryOptions): Effect.Effect<DiscoveredServer[]> =>
+		Effect.gen(function* () {
+			// Find all listening TCP ports for bun/opencode processes
+			const execResult = yield* Effect.tryPromise(() =>
+				execAsync(
+					`lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | grep -E 'bun|opencode' | awk '{print $2, $9}'`,
+					{ timeout: 2000 },
+				),
+			).pipe(
+				// lsof returns exit code 1 when grep finds no matches - that's OK
+				Effect.catchAll((error: any) => {
+					if (error.stdout !== undefined) {
+						return Effect.succeed({ stdout: error.stdout || "" })
+					}
+					return Effect.fail(error)
+				}),
+			)
+
+			const stdout = execResult.stdout
+
+			// Parse candidates
+			const candidates: CandidatePort[] = []
+			const seen = new Set<number>()
+
+			for (const line of stdout.trim().split("\n")) {
+				if (!line) continue
+				const [pid, address] = line.split(" ")
+				const portMatch = address?.match(/:(\d+)$/)
+				if (!portMatch) continue
+
+				const port = parseInt(portMatch[1], 10)
+				if (seen.has(port)) continue
+				seen.add(port)
+
+				candidates.push({ port, pid: parseInt(pid, 10) })
+			}
+
+			// Verify candidates with limited concurrency (max 5 at a time)
+			const tasks = candidates.map((c) => verifyOpencodeServer(c, options))
+			const results = yield* effectAllLimit(tasks, 5)
+			return results.filter((s): s is DiscoveredServer => s !== null)
+		}).pipe(
+			// Graceful degradation - discovery failures return empty array
+			Effect.catchAll(() => Effect.succeed([])),
+		),
+})

@@ -17,7 +17,7 @@
 
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest"
 import { Effect, Stream, Fiber, Duration } from "effect"
-import { WorldSSE, createWorldSSE, discoverServers, connectToSSE } from "./sse.js"
+import { WorldSSE, createWorldSSE, connectToSSE } from "./sse.js"
 import {
 	Registry,
 	connectionStatusAtom,
@@ -180,35 +180,8 @@ describe("WorldSSE - Configuration", () => {
 // ============================================================================
 // Server Discovery Tests
 // ============================================================================
-
-describe("discoverServers - lsof-based discovery", () => {
-	it("returns empty array in browser environment", async () => {
-		// Simulate browser by setting window
-		const originalWindow = (global as any).window
-		;(global as any).window = {}
-
-		const result = await Effect.runPromise(discoverServers())
-
-		expect(result).toEqual([])
-
-		// Restore
-		if (originalWindow === undefined) {
-			delete (global as any).window
-		} else {
-			;(global as any).window = originalWindow
-		}
-	})
-
-	it("handles lsof command failure gracefully", async () => {
-		// This test runs in Node.js but with no matching processes
-		// discoverServers should return empty array, not throw
-		const result = await Effect.runPromise(
-			discoverServers().pipe(Effect.catchAll(() => Effect.succeed([]))),
-		)
-
-		expect(Array.isArray(result)).toBe(true)
-	})
-})
+// NOTE: Discovery logic moved to ../discovery/ with its own test suite
+// WorldSSE now uses Discovery service via discoveryLayer in config
 
 // ============================================================================
 // SSE Stream Tests

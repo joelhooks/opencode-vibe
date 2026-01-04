@@ -84,7 +84,7 @@ describe("ServerAtom.discover", () => {
 
 	it("falls back to default server on error", async () => {
 		// The discover effect catches all errors and returns [DEFAULT_SERVER]
-		// We can't easily test error handling without mocking the ServerDiscovery service
+		// We can't easily test error handling without mocking the Discovery service
 		// But we can verify the fallback behavior
 		const servers = await Effect.runPromise(ServerAtom.discover())
 

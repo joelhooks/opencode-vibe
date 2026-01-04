@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from "vitest"
-import { getClientUrl, OPENCODE_URL, type RoutingContext } from "./client.js"
+import { createClient, getClientUrl, OPENCODE_URL, type RoutingContext } from "./client.js"
 
 describe("getClientUrl", () => {
 	it("returns proxy URL when no args", () => {
@@ -72,5 +72,47 @@ describe("regression prevention (from semantic memory)", () => {
 		expect(OPENCODE_URL).toBeTruthy()
 		expect(OPENCODE_URL).not.toBe("")
 		expect(OPENCODE_URL).toBe("http://localhost:4056")
+	})
+})
+
+describe("createClient with Discovery service", () => {
+	it("creates client with default proxy URL when no args", () => {
+		const client = createClient()
+		expect(client).toBeDefined()
+		// Client should use proxy URL internally (browser-safe)
+		// Actual URL is not exposed, but we can verify it works
+	})
+
+	it("creates client with proxy URL (always browser-safe)", () => {
+		// createClient ALWAYS uses proxy URL for browser-safety
+		// No async discovery needed since Next.js API routes handle it
+		const client = createClient("/path/to/project")
+		expect(client).toBeDefined()
+	})
+
+	it("accepts sessionId parameter for future routing", () => {
+		// sessionId is accepted but currently unused (for backwards compat)
+		// Future: could enable client-side session->server caching
+		const client = createClient("/path/to/project", "ses_123")
+		expect(client).toBeDefined()
+	})
+})
+
+describe("runWithDiscovery helper", () => {
+	it("runs Effect program with DiscoveryBrowserLive layer", async () => {
+		const { runWithDiscovery } = await import("./client.js")
+		const { Effect } = await import("effect")
+		const { Discovery } = await import("../discovery/index.js")
+
+		const result = await runWithDiscovery(
+			Effect.gen(function* () {
+				const discovery = yield* Discovery
+				// Mock discovery returns empty array (graceful degradation)
+				return yield* discovery.discover()
+			}),
+		)
+
+		// Discovery should return an array (empty in test environment)
+		expect(Array.isArray(result)).toBe(true)
 	})
 })

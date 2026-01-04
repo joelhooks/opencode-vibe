@@ -13,7 +13,12 @@
  */
 
 import { Effect } from "effect"
-import { ServerDiscovery, type ServerInfo, ServerDiscoveryDefault } from "../discovery/index.js"
+import {
+	Discovery,
+	type DiscoveredServer,
+	type ServerInfo,
+	DiscoveryDefault,
+} from "../discovery/index.js"
 
 /**
  * Default fallback server (localhost:4056)
@@ -60,23 +65,30 @@ export const ServerAtom = {
 	 */
 	discover: (): Effect.Effect<ServerInfo[], never> =>
 		Effect.gen(function* () {
-			const discovery = yield* ServerDiscovery
+			const discovery = yield* Discovery
 			const discoveredServers = yield* discovery.discover()
 
+			// Convert DiscoveredServer[] to ServerInfo[]
+			const servers: ServerInfo[] = discoveredServers.map((s: DiscoveredServer) => ({
+				port: s.port,
+				directory: s.directory,
+				url: `http://localhost:${s.port}`,
+			}))
+
 			// CRITICAL: Always include localhost:4056 default
-			if (discoveredServers.length === 0) {
+			if (servers.length === 0) {
 				return [DEFAULT_SERVER]
 			}
 
 			// Check if default server already in list
-			const hasDefault = discoveredServers.some(
+			const hasDefault = servers.some(
 				(s) => s.port === DEFAULT_SERVER.port && s.directory === DEFAULT_SERVER.directory,
 			)
 
 			// If default not found, prepend it
-			return hasDefault ? discoveredServers : [DEFAULT_SERVER, ...discoveredServers]
+			return hasDefault ? servers : [DEFAULT_SERVER, ...servers]
 		}).pipe(
-			Effect.provide(ServerDiscoveryDefault),
+			Effect.provide(DiscoveryDefault),
 			// On error, fall back to default server
 			Effect.catchAll(() => Effect.succeed([DEFAULT_SERVER])),
 		),

@@ -5,8 +5,11 @@
  *
  * Provides routing logic and SDK client factory.
  *
- * For SSR (Server Components), use:
- * import { createClientSSR } from "@opencode-vibe/core/client/server"
+ * For SSR (Server Components), use createClientSSR from main package:
+ * ```typescript
+ * import { createClientSSR } from "@opencode-vibe/core"
+ * const client = await createClientSSR(directory)
+ * ```
  */
 
 export {
@@ -14,6 +17,7 @@ export {
 	OPENCODE_URL,
 	createClient,
 	globalClient,
+	runWithDiscovery,
 	type RoutingContext,
 	type OpencodeClient,
 } from "./client.js"

@@ -10,9 +10,17 @@
  * @module discovery/server
  */
 
-// Process-based discovery (Node.js only - uses child_process)
-export {
-	discoverServers,
-	type DiscoveredServer,
-	type DiscoveryOptions,
-} from "./server-discovery.js"
+// Node.js Discovery Layer (uses child_process for lsof)
+export { DiscoveryNodeLive } from "./discovery.node.js"
+
+// Re-export Discovery service for convenience
+export { Discovery } from "./types.js"
+
+// Re-export types
+export type {
+	DiscoveredServer,
+	DiscoveredSession,
+	DiscoveredProject,
+	DiscoveryOptions,
+	ServerInfo,
+} from "./types.js"

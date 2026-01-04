@@ -2,11 +2,12 @@
  * World SSE - Self-contained SSE connection management
  *
  * Effect-forward implementation that:
- * 1. Discovers servers via lsof (no proxy routes)
+ * 1. Discovers servers via Discovery service (browser fetch proxy or Node.js lsof)
  * 2. Connects directly to server SSE endpoints
  * 3. Feeds events to WorldStore atoms
  *
- * This replaces MultiServerSSE with a clean, self-contained implementation.
+ * Uses Discovery Layer from config (defaults to DiscoveryBrowserLive).
+ * This enables testing with mock Discovery implementations.
  */
 
 import {
@@ -46,16 +47,11 @@ import type { Project } from "../types/sdk.js"
 import { parseSSEEvent } from "../sse/parse.js"
 import type { SSEEvent as ParsedSSEEvent } from "../sse/schemas.js"
 import { routeEvent } from "./event-router.js"
+import { Discovery, DiscoveryBrowserLive, type DiscoveredServer } from "../discovery/index.js"
 
 // ============================================================================
 // Types
 // ============================================================================
-
-export interface DiscoveredServer {
-	port: number
-	pid: number
-	directory: string
-}
 
 export interface SSEEvent {
 	type: string
@@ -73,6 +69,15 @@ export interface WorldSSEConfig {
 	maxReconnectAttempts?: number
 	/** Callback for raw SSE events (for logging/debugging) */
 	onEvent?: (event: SSEEventInfo) => void
+	/**
+	 * Discovery Layer (default: DiscoveryBrowserLive)
+	 *
+	 * Inject custom Discovery implementation for testing or Node.js environments.
+	 * Browser: DiscoveryBrowserLive (fetch to /api/opencode/servers)
+	 * Node.js: DiscoveryNodeLive (lsof process scanning)
+	 * Testing: Use makeTestLayer from ../discovery
+	 */
+	discoveryLayer?: Layer.Layer<Discovery>
 }
 
 // ============================================================================
@@ -108,168 +113,6 @@ function getApiBaseUrl(port: number): string {
 		return `/api/opencode/${port}`
 	}
 	return `http://127.0.0.1:${port}`
-}
-
-/**
- * Discover servers via browser proxy API
- * Fetches /api/opencode/servers which returns discovered servers
- */
-function discoverServersFromProxy(): Effect.Effect<DiscoveredServer[], Error> {
-	return Effect.tryPromise({
-		try: async () => {
-			const response = await fetch("/api/opencode/servers")
-			if (!response.ok) {
-				console.warn(`[WorldSSE] Discovery failed: ${response.status}`)
-				return []
-			}
-			const servers = (await response.json()) as Array<{
-				port: number
-				pid?: number
-				directory: string
-			}>
-			return servers.map((s) => ({
-				port: s.port,
-				pid: s.pid ?? 0,
-				directory: s.directory,
-			}))
-		},
-		catch: () => new Error("Failed to discover servers from proxy"),
-	}).pipe(Effect.catchAll(() => Effect.succeed([] as DiscoveredServer[])))
-}
-
-// ============================================================================
-// Discovery - lsof in CLI, proxy API in browser
-// ============================================================================
-
-/**
- * Discover running OpenCode servers
- *
- * In browser: fetches /api/opencode-servers (Next.js proxy)
- * In CLI/server: uses lsof to find bun/opencode processes
- *
- * SSR: Returns empty array (no discovery during server-side rendering)
- */
-export function discoverServers(): Effect.Effect<DiscoveredServer[], Error> {
-	return Effect.gen(function* () {
-		// SSR guard - skip discovery during server-side rendering
-		// Discovery requires either browser fetch API or Node.js child_process
-		// During Next.js SSR, window is undefined but we're in Node context
-		// HOWEVER: fetch calls to proxy routes will fail (routes don't exist yet)
-		// AND: child_process.exec with lsof causes timeouts/aborts
-		if (typeof window === "undefined") {
-			console.debug("[WorldSSE] Skipping discovery during SSR")
-			return []
-		}
-
-		// Browser: use proxy API for discovery
-		if (isBrowser()) {
-			return yield* discoverServersFromProxy()
-		}
-
-		// Dynamic import for Node.js child_process
-		const { exec } = yield* Effect.promise(() => import("child_process"))
-		const { promisify } = yield* Effect.promise(() => import("util"))
-		const execAsync = promisify(exec)
-
-		// Find listening TCP ports for bun/opencode processes
-		const result = yield* Effect.tryPromise({
-			try: async () => {
-				try {
-					const { stdout } = await execAsync(
-						`lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | grep -E 'bun|opencode' | awk '{print $2, $9}'`,
-						{ timeout: 2000 },
-					)
-					return stdout
-				} catch (error: any) {
-					// lsof returns exit code 1 when grep finds no matches - that's OK
-					if (error.stdout !== undefined) {
-						return error.stdout || ""
-					}
-					throw error
-				}
-			},
-			catch: (error) => new Error(`Discovery failed: ${error}`),
-		})
-
-		// Parse candidates
-		const candidates: Array<{ port: number; pid: number }> = []
-		const seen = new Set<number>()
-
-		for (const line of result.trim().split("\n")) {
-			if (!line) continue
-			const [pid, address] = line.split(" ")
-			const portMatch = address?.match(/:(\d+)$/)
-			if (!portMatch) continue
-
-			const port = parseInt(portMatch[1]!, 10)
-			if (seen.has(port)) continue
-			seen.add(port)
-
-			candidates.push({ port, pid: parseInt(pid!, 10) })
-		}
-
-		// Verify each candidate is an OpenCode server
-		const servers: DiscoveredServer[] = []
-
-		for (const candidate of candidates) {
-			const server = yield* verifyServer(candidate.port, candidate.pid)
-			if (server) {
-				servers.push(server)
-			}
-		}
-
-		return servers
-	})
-}
-
-/**
- * Verify a port is an OpenCode server by checking /project/current
- *
- * SSR: Returns null (no verification during server-side rendering)
- */
-function verifyServer(port: number, pid: number): Effect.Effect<DiscoveredServer | null, never> {
-	return Effect.gen(function* () {
-		// SSR guard - skip verification during server-side rendering
-		// AbortController + fetch causes timeouts during Next.js SSR
-		if (typeof window === "undefined") {
-			console.debug("[WorldSSE] Skipping server verification during SSR")
-			return null
-		}
-
-		const controller = new AbortController()
-		const timeoutId = setTimeout(() => controller.abort(), 500)
-
-		try {
-			const response = yield* Effect.tryPromise({
-				try: () =>
-					fetch(`http://127.0.0.1:${port}/project/current`, {
-						signal: controller.signal,
-					}),
-				catch: () => null,
-			})
-
-			clearTimeout(timeoutId)
-
-			if (!response || !response.ok) return null
-
-			const project = yield* Effect.tryPromise({
-				try: () => response.json() as Promise<{ worktree?: string }>,
-				catch: () => null,
-			})
-
-			if (!project) return null
-
-			const directory = project.worktree
-			if (!directory || directory === "/" || directory.length <= 1) {
-				return null
-			}
-
-			return { port, pid, directory }
-		} catch {
-			clearTimeout(timeoutId)
-			return null
-		}
-	}).pipe(Effect.catchAll(() => Effect.succeed(null)))
 }
 
 // ============================================================================
@@ -387,6 +230,7 @@ export class WorldSSE {
 			autoReconnect: config.autoReconnect ?? true,
 			maxReconnectAttempts: config.maxReconnectAttempts ?? 10,
 			onEvent: config.onEvent ?? (() => {}),
+			discoveryLayer: config.discoveryLayer ?? DiscoveryBrowserLive,
 		}
 	}
 
@@ -462,14 +306,13 @@ export class WorldSSE {
 	}
 
 	/**
-	 * Start the discovery loop
+	 * Start the discovery loop using Discovery service
 	 */
 	private startDiscoveryLoop(): void {
 		const discoverAndUpdate = Effect.gen(this, function* () {
-			// Discover servers
-			const servers = yield* discoverServers().pipe(
-				Effect.catchAll(() => Effect.succeed([] as DiscoveredServer[])),
-			)
+			// Use Discovery service to discover servers
+			const discovery = yield* Discovery
+			const servers = yield* discovery.discover()
 
 			// Convert DiscoveredServer[] to Instance[] and feed to Registry
 			const instances = servers.map((server) => ({
@@ -523,6 +366,8 @@ export class WorldSSE {
 			Effect.repeat(Schedule.fixed(this.config.discoveryIntervalMs)),
 			Effect.asVoid,
 			Effect.interruptible,
+			// Provide Discovery layer from config
+			Effect.provide(this.config.discoveryLayer),
 		)
 
 		this.discoveryFiber = Effect.runFork(discoveryEffect)
@@ -726,11 +571,15 @@ export class SSEService extends Context.Tag("SSEService")<SSEService, SSEService
  * Pattern from cursor-store.ts: Layer.scoped wraps WorldSSE class,
  * providing Effect-native lifecycle management.
  *
+ * Composes with Discovery layer from config (defaults to DiscoveryBrowserLive).
+ * This enables testing with mock Discovery implementations.
+ *
  * @param registry - Registry to feed events into
- * @param config - SSE configuration
+ * @param config - SSE configuration (optional discoveryLayer for testing)
  *
  * @example
  * ```typescript
+ * // Default discovery (DiscoveryBrowserLive)
  * const program = Effect.gen(function* () {
  *   const sseService = yield* SSEService
  *   yield* sseService.start()
@@ -741,6 +590,16 @@ export class SSEService extends Context.Tag("SSEService")<SSEService, SSEService
  *
  * Effect.runPromise(
  *   program.pipe(Effect.provide(SSEServiceLive(registry)))
+ * )
+ *
+ * // Custom discovery for testing
+ * const MockDiscoveryLive = Layer.succeed(Discovery, {
+ *   discover: () => Effect.succeed([{ port: 3000, pid: 123, directory: "/test" }])
+ * })
+ * Effect.runPromise(
+ *   program.pipe(
+ *     Effect.provide(SSEServiceLive(registry, { discoveryLayer: MockDiscoveryLive }))
+ *   )
  * )
  * ```
  */

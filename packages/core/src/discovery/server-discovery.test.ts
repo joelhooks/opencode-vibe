@@ -1,11 +1,12 @@
 /**
  * Server Discovery Tests (Node.js-only)
  *
- * Tests for lsof-based server discovery that uses child_process.
+ * Tests for lsof-based server discovery using Effect layers.
  */
 
 import { describe, expect, test, vi, beforeEach, afterEach } from "vitest"
-import type { DiscoveredServer } from "./server-discovery.js"
+import { Effect } from "effect"
+import { Discovery, type DiscoveredServer } from "./types.js"
 
 // Mock child_process exec
 const mockExec = vi.fn()
@@ -18,9 +19,9 @@ const mockFetch = vi.fn()
 global.fetch = mockFetch as any
 
 // Import after mocks are set up
-const { discoverServers } = await import("./server-discovery.js")
+const { DiscoveryNodeLive } = await import("./discovery.node.js")
 
-describe("discoverServers", () => {
+describe("DiscoveryNodeLive", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 	})
@@ -54,7 +55,12 @@ describe("discoverServers", () => {
 				}),
 			)
 
-		const servers = await discoverServers()
+		const program = Effect.gen(function* () {
+			const discovery = yield* Discovery
+			return yield* discovery.discover()
+		})
+
+		const servers = await Effect.runPromise(program.pipe(Effect.provide(DiscoveryNodeLive)))
 
 		expect(servers).toEqual([
 			{ port: 4056, pid: 12345, directory: "/Users/joel/Code/project1" },
@@ -68,7 +74,12 @@ describe("discoverServers", () => {
 			return {} as any
 		})
 
-		const servers = await discoverServers()
+		const program = Effect.gen(function* () {
+			const discovery = yield* Discovery
+			return yield* discovery.discover()
+		})
+
+		const servers = await Effect.runPromise(program.pipe(Effect.provide(DiscoveryNodeLive)))
 		expect(servers).toEqual([])
 	})
 
@@ -78,7 +89,12 @@ describe("discoverServers", () => {
 			return {} as any
 		})
 
-		const servers = await discoverServers()
+		const program = Effect.gen(function* () {
+			const discovery = yield* Discovery
+			return yield* discovery.discover()
+		})
+
+		const servers = await Effect.runPromise(program.pipe(Effect.provide(DiscoveryNodeLive)))
 		expect(servers).toEqual([])
 	})
 
@@ -104,7 +120,12 @@ describe("discoverServers", () => {
 			.mockResolvedValueOnce(new Response("Not Found", { status: 404 }))
 			.mockRejectedValueOnce(new Error("Connection refused"))
 
-		const servers = await discoverServers()
+		const program = Effect.gen(function* () {
+			const discovery = yield* Discovery
+			return yield* discovery.discover()
+		})
+
+		const servers = await Effect.runPromise(program.pipe(Effect.provide(DiscoveryNodeLive)))
 
 		expect(servers).toEqual([{ port: 4056, pid: 12345, directory: "/Users/joel/Code/project1" }])
 	})
@@ -131,7 +152,12 @@ describe("discoverServers", () => {
 			.mockResolvedValueOnce(new Response(JSON.stringify({ worktree: "/" }), { status: 200 })) // Root - invalid
 			.mockResolvedValueOnce(new Response(JSON.stringify({ worktree: "" }), { status: 200 })) // Empty - invalid
 
-		const servers = await discoverServers()
+		const program = Effect.gen(function* () {
+			const discovery = yield* Discovery
+			return yield* discovery.discover()
+		})
+
+		const servers = await Effect.runPromise(program.pipe(Effect.provide(DiscoveryNodeLive)))
 
 		expect(servers).toEqual([{ port: 4056, pid: 12345, directory: "/Users/joel/Code/project1" }])
 	})
@@ -161,7 +187,12 @@ describe("discoverServers", () => {
 				}),
 			)
 
-		const servers = await discoverServers()
+		const program = Effect.gen(function* () {
+			const discovery = yield* Discovery
+			return yield* discovery.discover()
+		})
+
+		const servers = await Effect.runPromise(program.pipe(Effect.provide(DiscoveryNodeLive)))
 
 		// Should only verify port 4056 once
 		expect(mockFetch).toHaveBeenCalledTimes(2)
@@ -177,7 +208,12 @@ describe("discoverServers", () => {
 			return {} as any
 		})
 
-		const servers = await discoverServers()
+		const program = Effect.gen(function* () {
+			const discovery = yield* Discovery
+			return yield* discovery.discover()
+		})
+
+		const servers = await Effect.runPromise(program.pipe(Effect.provide(DiscoveryNodeLive)))
 		expect(servers).toEqual([])
 	})
 
@@ -203,7 +239,12 @@ describe("discoverServers", () => {
 				}),
 		)
 
-		const servers = await discoverServers()
+		const program = Effect.gen(function* () {
+			const discovery = yield* Discovery
+			return yield* discovery.discover()
+		})
+
+		const servers = await Effect.runPromise(program.pipe(Effect.provide(DiscoveryNodeLive)))
 
 		// Should timeout and return empty (verification failed)
 		expect(servers).toEqual([])

@@ -7,7 +7,8 @@
  * - @opencode-vibe/core/atoms - State atoms
  * - @opencode-vibe/core/discovery - Server discovery
  * - @opencode-vibe/core/sse - SSE streaming
- * - @opencode-vibe/core/client - API client
+ * - @opencode-vibe/core/client - API client (browser-safe)
+ * - @opencode-vibe/core - SSR client (createClientSSR, globalClientSSR)
  * - @opencode-vibe/core/utils - Utilities
  * - @opencode-vibe/core/types - Type definitions
  */
@@ -22,3 +23,6 @@ export * from "./sse/index.js"
 export * from "./client/index.js"
 export * from "./utils/index.js"
 export * from "./types/index.js"
+
+// SSR-specific exports (uses Node.js discovery)
+export { createClientSSR, globalClientSSR, type OpencodeClient } from "./client-ssr.js"

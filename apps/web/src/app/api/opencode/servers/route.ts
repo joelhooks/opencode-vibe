@@ -4,30 +4,39 @@
  * Discovers running opencode servers by scanning processes.
  * Uses shared discovery logic from @opencode-vibe/core/discovery/server.
  *
- * Query params:
- * - includeSessions: "true" to fetch session IDs for each server
- * - includeSessionDetails: "true" to fetch full session details (id, title, updatedAt)
- * - includeProjects: "true" to fetch project info (id, directory, name)
+ * By default, includes sessions (IDs) and projects. Query params:
+ * - includeSessions: "false" to exclude session IDs
+ * - includeSessionDetails: "true" to include full session details (title, updatedAt)
+ * - includeProjects: "false" to exclude project info
  *
  * Returns: { servers: [...], usage: {...} }
  */
 
-import { discoverServers } from "@opencode-vibe/core/discovery/server"
+import { Discovery, DiscoveryNodeLive } from "@opencode-vibe/core/discovery/server"
 import { type NextRequest, NextResponse } from "next/server"
+import { Effect } from "effect"
 
 export async function GET(request: NextRequest) {
 	const startTime = Date.now()
 	const searchParams = request.nextUrl.searchParams
-	const includeSessions = searchParams.get("includeSessions") === "true"
+
+	// Sessions (IDs) and projects included by default, can be disabled with =false
+	// Session details (title, updatedAt) opt-in only
+	const includeSessions = searchParams.get("includeSessions") !== "false"
 	const includeSessionDetails = searchParams.get("includeSessionDetails") === "true"
-	const includeProjects = searchParams.get("includeProjects") === "true"
+	const includeProjects = searchParams.get("includeProjects") !== "false"
 
 	try {
-		const servers = await discoverServers({
-			includeSessions,
-			includeSessionDetails,
-			includeProjects,
-		})
+		const servers = await Effect.runPromise(
+			Effect.gen(function* () {
+				const discovery = yield* Discovery
+				return yield* discovery.discover({
+					includeSessions,
+					includeSessionDetails,
+					includeProjects,
+				})
+			}).pipe(Effect.provide(DiscoveryNodeLive)),
+		)
 
 		const duration = Date.now() - startTime
 		if (duration > 500) {
@@ -38,21 +47,19 @@ export async function GET(request: NextRequest) {
 			{
 				servers,
 				usage: {
-					description: "Discovered OpenCode servers running on this machine",
+					description:
+						"Discovered OpenCode servers running on this machine (sessions IDs and projects included by default)",
 					options: {
 						includeSessions:
-							"Add ?includeSessions=true to get session IDs per server (adds sessions: string[])",
+							"Sessions (IDs) included by default. Add ?includeSessions=false to exclude",
 						includeSessionDetails:
-							"Add ?includeSessionDetails=true to get full session info (adds sessionDetails: { id, title, updatedAt }[])",
-						includeProjects:
-							"Add ?includeProjects=true to get project info (adds project: { id, directory, name })",
+							"Session details (title, updatedAt) opt-in. Add ?includeSessionDetails=true to include",
+						includeProjects: "Projects included by default. Add ?includeProjects=false to exclude",
 					},
 					examples: {
-						basic: "/api/opencode/servers",
-						withSessions: "/api/opencode/servers?includeSessions=true",
+						default: "/api/opencode/servers (sessions IDs + projects)",
 						withDetails: "/api/opencode/servers?includeSessionDetails=true",
-						withProjects: "/api/opencode/servers?includeProjects=true",
-						combined: "/api/opencode/servers?includeSessionDetails=true&includeProjects=true",
+						minimal: "/api/opencode/servers?includeSessions=false&includeProjects=false",
 					},
 					routing: {
 						byDirectory: "Match server.directory to route requests to correct port",

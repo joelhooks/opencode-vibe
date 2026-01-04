@@ -1,8 +1,14 @@
 /**
  * useMultiDirectorySessions - Get sessions from multiple directories
  *
- * Returns sessions from the Zustand store for multiple project directories.
- * Subscribes to real-time updates via SSE.
+ * Returns sessions from World Stream for multiple project directories.
+ * Subscribes to real-time updates via World Stream (SSE → atoms).
+ *
+ * MIGRATION NOTE (opencode-next--xts0a-mk0420294om):
+ * - Migrated from Zustand to World Stream
+ * - Now uses useWorld() for reactive state
+ * - No longer requires useSSEEvents() call
+ * - Pattern matches useMultiDirectoryStatus
  *
  * @example
  * ```tsx
@@ -13,9 +19,9 @@
 
 "use client"
 
-import { useEffect, useState } from "react"
+import { useMemo } from "react"
 import { formatRelativeTime } from "@opencode-vibe/core/utils"
-import { useOpencodeStore } from "../store"
+import { useWorld } from "./use-world"
 
 /**
  * Session in display format (for UI)
@@ -31,86 +37,49 @@ export interface SessionDisplay {
 /**
  * Hook to get sessions from multiple directories
  *
- * Subscribes to store updates for all provided directories.
+ * **Migrated to World Stream** (opencode-next--xts0a-mk0420294om):
+ * - Uses useWorld() for reactive state (replaces Zustand subscription)
+ * - World Stream provides sessions via EnrichedSession
+ * - No longer requires useSSEEvents() - LayoutClient routes to World Stream
+ *
  * Returns sessions mapped by directory path.
  *
  * @param directories - Array of directory paths to get sessions for
  * @returns Record of directory -> SessionDisplay[]
  */
 export function useMultiDirectorySessions(directories: string[]): Record<string, SessionDisplay[]> {
-	const [liveSessions, setLiveSessions] = useState<Record<string, SessionDisplay[]>>({})
+	// Get world state
+	const world = useWorld()
 
-	/**
-	 * Subscribe to store updates for all directories
-	 */
-	useEffect(() => {
+	// Filter sessions by requested directories and transform to display format
+	const liveSessions = useMemo(() => {
 		const directorySet = new Set(directories)
+		const result: Record<string, SessionDisplay[]> = {}
 
-		const extractSessions = (
-			state: ReturnType<typeof useOpencodeStore.getState>,
-		): Record<string, SessionDisplay[]> => {
-			const newSessions: Record<string, SessionDisplay[]> = {}
-
-			for (const directory of directorySet) {
-				const dirState = state.directories[directory]
-
-				// Initialize empty array for directory even if not in store yet
-				// This ensures the component always has a consistent shape to work with
-				if (!dirState) {
-					console.log(
-						"[useMultiDirectorySessions] Directory not in store yet (will auto-init on first SSE event):",
-						directory,
-					)
-					newSessions[directory] = []
-					continue
-				}
-
-				const storeSessions: SessionDisplay[] = dirState.sessions.map((session) => ({
-					id: session.id,
-					title: session.title || "Untitled Session",
-					directory,
-					formattedTime: formatRelativeTime(session.time.updated || session.time.created),
-					timestamp: session.time.updated || session.time.created,
-				}))
-
-				newSessions[directory] = storeSessions
-
-				console.log(
-					"[useMultiDirectorySessions] Extracted sessions for",
-					directory,
-					":",
-					storeSessions.length,
-				)
-			}
-
-			return newSessions
+		// Initialize empty arrays for all directories
+		for (const directory of directorySet) {
+			result[directory] = []
 		}
 
-		// Read initial state
-		const initialSessions = extractSessions(useOpencodeStore.getState())
-		console.log("[useMultiDirectorySessions] Initial state:", Object.keys(initialSessions))
-		setLiveSessions(initialSessions)
+		// Group sessions by directory
+		for (const session of world.sessions) {
+			if (!directorySet.has(session.directory)) continue
 
-		// Subscribe to future updates
-		const unsubscribe = useOpencodeStore.subscribe((state) => {
-			const updated = extractSessions(state)
-			console.log(
-				"[useMultiDirectorySessions] Store updated, re-extracting sessions:",
-				Object.keys(updated),
-			)
-			setLiveSessions(updated)
-		})
+			// Use lastActivityAt (computed by World Stream) for most accurate time
+			// Fall back to time.updated → time.created for sessions without activity tracking
+			const timestamp = session.lastActivityAt || session.time.updated || session.time.created
 
-		console.log(
-			"[useMultiDirectorySessions] Subscribed to store for directories:",
-			Array.from(directorySet),
-		)
-
-		return () => {
-			console.log("[useMultiDirectorySessions] Unsubscribing from store")
-			unsubscribe()
+			result[session.directory]!.push({
+				id: session.id,
+				title: session.title || "Untitled Session",
+				directory: session.directory,
+				formattedTime: formatRelativeTime(timestamp),
+				timestamp,
+			})
 		}
-	}, [directories])
+
+		return result
+	}, [world.sessions, directories])
 
 	return liveSessions
 }

@@ -1,9 +1,26 @@
 /**
- * Server Discovery Logic
+ * Server Discovery Logic (DEPRECATED)
  *
- * Discovers running opencode servers by scanning processes.
- * Extracted from API route so it can be called directly during SSR
- * without causing self-fetch deadlock.
+ * @deprecated Use DiscoveryNodeLive from discovery.node.ts instead.
+ * This file provides the legacy promise-based API for backwards compatibility.
+ *
+ * Migration:
+ * ```typescript
+ * // Old:
+ * import { discoverServers } from "./server-discovery.js"
+ * const servers = await discoverServers({ includeSessions: true })
+ *
+ * // New:
+ * import { Effect } from "effect"
+ * import { Discovery } from "./types.js"
+ * import { DiscoveryNodeLive } from "./discovery.node.js"
+ *
+ * const program = Effect.gen(function* () {
+ *   const discovery = yield* Discovery
+ *   return yield* discovery.discover({ includeSessions: true })
+ * })
+ * const servers = await Effect.runPromise(program.pipe(Effect.provide(DiscoveryNodeLive)))
+ * ```
  */
 
 import { exec } from "child_process"

@@ -38,54 +38,73 @@ function buildQueryString(options?: DiscoveryOptions): string {
 }
 
 /**
- * Create Discovery implementation with injectable fetch
+ * Browser discovery implementation with injectable fetch
  */
-function makeDiscovery(fetchFn: typeof fetch = fetch) {
-	return {
-		discover: (options?: DiscoveryOptions) =>
-			Effect.gen(function* () {
-				// Build endpoint URL with query params
-				const queryString = buildQueryString(options)
-				const url = `/api/opencode/servers${queryString}`
+function makeDiscoverImpl(
+	fetchFn: typeof fetch,
+): (options?: DiscoveryOptions) => Effect.Effect<DiscoveredServer[]> {
+	return (options?: DiscoveryOptions) =>
+		Effect.gen(function* () {
+			// Build endpoint URL with query params
+			const queryString = buildQueryString(options)
+			const url = `/api/opencode/servers${queryString}`
 
-				// Fetch from API endpoint
-				const response = yield* Effect.tryPromise({
-					try: () => fetchFn(url),
-					catch: () => new Error("Failed to fetch servers"),
-				})
+			// Fetch from API endpoint
+			const response = yield* Effect.tryPromise({
+				try: () => fetchFn(url),
+				catch: () => new Error("Failed to fetch servers"),
+			})
 
-				// Check response status
-				if (!response.ok) {
-					return []
-				}
+			// Check response status
+			if (!response.ok) {
+				return []
+			}
 
-				// Parse JSON
-				const data = yield* Effect.tryPromise({
-					try: () => response.json(),
-					catch: () => new Error("Failed to parse JSON"),
-				})
+			// Parse JSON
+			const data = yield* Effect.tryPromise({
+				try: () => response.json(),
+				catch: () => new Error("Failed to parse JSON"),
+			})
 
-				// Validate and filter
-				if (!Array.isArray(data)) {
-					return []
-				}
+			// Validate and filter
+			if (!Array.isArray(data)) {
+				return []
+			}
 
-				const servers = data.filter(isValidServer)
-				return servers
-			}).pipe(
-				// On ANY error, return empty array (graceful degradation)
-				Effect.catchAll(() => Effect.succeed([])),
-			),
-	}
+			const servers = data.filter(isValidServer)
+			return servers
+		}).pipe(
+			// On ANY error, return empty array (graceful degradation)
+			Effect.catchAll(() => Effect.succeed([])),
+		)
 }
 
 /**
  * DiscoveryBrowserLive Layer
  *
- * Provides Discovery service using browser fetch.
+ * Provides Discovery service using browser fetch to /api/opencode/servers.
  * Use in browser/Next.js app.
+ *
+ * USAGE:
+ * ```typescript
+ * import { DiscoveryBrowserLive } from "@opencode-vibe/core/discovery"
+ *
+ * const program = Effect.gen(function* () {
+ *   const discovery = yield* Discovery
+ *   const servers = yield* discovery.discover({ includeSessions: true })
+ *   console.log(servers)
+ * })
+ *
+ * Effect.runPromise(program.pipe(Effect.provide(DiscoveryBrowserLive)))
+ * ```
  */
-export const DiscoveryBrowserLive = Layer.succeed(Discovery, makeDiscovery())
+export const DiscoveryBrowserLive = Layer.succeed(Discovery, {
+	_tag: "Discovery" as const,
+	/**
+	 * Discover running OpenCode servers via browser fetch
+	 */
+	discover: makeDiscoverImpl(fetch),
+})
 
 /**
  * Default export for backwards compatibility
@@ -97,4 +116,7 @@ export const Default = DiscoveryBrowserLive
  * @internal
  */
 export const makeTestLayer = (fetchFn: typeof fetch) =>
-	Layer.succeed(Discovery, makeDiscovery(fetchFn))
+	Layer.succeed(Discovery, {
+		_tag: "Discovery" as const,
+		discover: makeDiscoverImpl(fetchFn),
+	})

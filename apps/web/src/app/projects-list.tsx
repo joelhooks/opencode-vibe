@@ -4,14 +4,19 @@
  * ProjectsList - Live client component for displaying projects with sessions
  *
  * Shows a green indicator for active/running sessions.
- * Bootstraps session status for all projects on mount, then subscribes to SSE for real-time updates.
+ * Subscribes to World Stream for real-time updates (SSE → World Stream via LayoutClient).
  * Sessions auto-sort by last activity with smooth animations.
+ *
+ * MIGRATION NOTE (opencode-next--xts0a-mk0420294om):
+ * - Removed useSSEEvents() call (no longer needed)
+ * - useMultiDirectorySessions now uses World Stream directly
+ * - useMultiDirectoryStatus already used World Stream
  */
 
 import { useMemo, memo, useState, useEffect } from "react"
 import Link from "next/link"
 import { motion, AnimatePresence } from "framer-motion"
-import { useLiveTime, useConnectionStatus, useSSEEvents } from "@/app/hooks"
+import { useLiveTime, useConnectionStatus } from "@/app/hooks"
 import {
 	useMultiDirectorySessions,
 	useMultiDirectoryStatus,
@@ -285,9 +290,9 @@ function SSEStatus() {
 /**
  * ProjectsList - Renders projects with live session status
  *
- * 1. Bootstraps session statuses for all projects on mount
- * 2. Subscribes to SSE for real-time status updates
- * 3. Merges live sessions from store with initial server data
+ * 1. SSE events flow: LayoutClient → parseSSEEvent → routeEvent → World Stream atoms
+ * 2. Hooks subscribe to World Stream via useWorld()
+ * 3. Merges live sessions from World Stream with initial server data
  */
 export function ProjectsList({ initialProjects }: ProjectsListProps) {
 	// Get directories for multi-directory hooks
@@ -308,11 +313,8 @@ export function ProjectsList({ initialProjects }: ProjectsListProps) {
 		return result
 	}, [initialProjects])
 
-	// CRITICAL: Subscribe to SSE events and route to store
-	// Without this, multiServerSSE emits events but they never reach the Zustand store
-	useSSEEvents()
-
-	// Use new multi-directory hooks
+	// Multi-directory hooks - now use World Stream directly
+	// No longer require useSSEEvents() - LayoutClient routes SSE to World Stream
 	const liveSessions = useMultiDirectorySessions(directories)
 	const { sessionStatuses, lastActivity } = useMultiDirectoryStatus(
 		directories,

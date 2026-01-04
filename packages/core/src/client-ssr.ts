@@ -1,28 +1,35 @@
 /**
- * Server-only client utilities
+ * Server-Side Rendering (SSR) client utilities
  *
- * This module uses Node.js APIs (child_process via lsof).
+ * This module uses Node.js-specific discovery (DiscoveryNodeLive).
  * Only import from:
  * - Server Components
  * - API Routes
  * - CLI tools
  *
  * DO NOT import from client components or browser code.
+ *
+ * @module client-ssr
  */
 
+import { Effect } from "effect"
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk/client"
-import { discoverServers } from "../discovery/server-discovery.js"
-import { getServerForDirectory, getServerForSession, type ServerInfo } from "../discovery/index.js"
+import {
+	Discovery,
+	getServerForDirectory,
+	getServerForSession,
+	type ServerInfo,
+} from "./discovery/index.js"
+import { DiscoveryNodeLive } from "./discovery/server.js"
+import { OPENCODE_URL } from "./client/client.js"
 
-const OPENCODE_URL = process.env.NEXT_PUBLIC_OPENCODE_URL ?? "http://localhost:4056"
+export type { OpencodeClient }
 
 /**
- * SSR-specific async client factory that uses server discovery
+ * Create an OpenCode SDK client for Server-Side Rendering (SSR)
  *
- * This function is for SERVER-SIDE RENDERING ONLY. It:
- * 1. Discovers servers directly via lsof (Node.js)
- * 2. Routes requests directly to server ports
- * 3. Falls back to OPENCODE_URL if discovery fails
+ * Uses DiscoveryNodeLive (Node.js lsof) for direct server discovery.
+ * This function is for SERVER-SIDE RENDERING ONLY (Next.js Server Components, API routes, CLI).
  *
  * @param directory - Optional project directory for scoping
  * @param sessionId - Optional session ID for session-specific routing
@@ -30,7 +37,7 @@ const OPENCODE_URL = process.env.NEXT_PUBLIC_OPENCODE_URL ?? "http://localhost:4
  *
  * @example Server Component
  * ```tsx
- * import { createClientSSR } from "@opencode-vibe/core/client/server"
+ * import { createClientSSR } from "@opencode-vibe/core"
  *
  * export default async function Page() {
  *   const client = await createClientSSR()
@@ -43,15 +50,13 @@ export async function createClientSSR(
 	directory?: string,
 	sessionId?: string,
 ): Promise<OpencodeClient> {
-	// Discover servers directly (Node.js - uses lsof)
-	const discovered = await discoverServers()
-
-	// Transform to ServerInfo format
-	const servers: ServerInfo[] = discovered.map((server) => ({
-		port: server.port,
-		directory: server.directory,
-		url: `http://127.0.0.1:${server.port}`,
-	}))
+	// Discover servers using Node.js lsof
+	const servers = await Effect.runPromise(
+		Effect.gen(function* () {
+			const discovery = yield* Discovery
+			return yield* discovery.discover()
+		}).pipe(Effect.provide(DiscoveryNodeLive)),
+	)
 
 	// No servers found - fallback to default
 	if (servers.length === 0) {
@@ -61,15 +66,22 @@ export async function createClientSSR(
 		})
 	}
 
+	// Convert to ServerInfo format for routing logic
+	const serverInfos: ServerInfo[] = servers.map((server) => ({
+		port: server.port,
+		directory: server.directory,
+		url: `http://127.0.0.1:${server.port}`,
+	}))
+
 	// Route using same logic as client-side createClient
 	let serverUrl: string
 
 	if (sessionId && directory) {
-		serverUrl = getServerForSession(sessionId, directory, servers)
+		serverUrl = getServerForSession(sessionId, directory, serverInfos)
 	} else if (directory) {
-		serverUrl = getServerForDirectory(directory, servers)
+		serverUrl = getServerForDirectory(directory, serverInfos)
 	} else {
-		serverUrl = servers[0]?.url ?? OPENCODE_URL
+		serverUrl = serverInfos[0]?.url ?? OPENCODE_URL
 	}
 
 	return createOpencodeClient({
@@ -84,7 +96,7 @@ export async function createClientSSR(
  *
  * @example
  * ```tsx
- * import { globalClientSSR } from "@opencode-vibe/core/client/server"
+ * import { globalClientSSR } from "@opencode-vibe/core"
  *
  * export default async function Page() {
  *   const client = await globalClientSSR

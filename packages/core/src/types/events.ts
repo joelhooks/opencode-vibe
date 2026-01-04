@@ -10,44 +10,21 @@
 // Re-export SDK event types (source of truth)
 export type { GlobalEvent } from "./sdk.js"
 
+// Re-export discovery types (source of truth moved to discovery module)
+export type {
+	DiscoveredServer,
+	DiscoveredSession,
+	DiscoveredProject,
+} from "../discovery/types.js"
+
+// Import for local usage
+import type { DiscoveredServer } from "../discovery/types.js"
+
 /**
  * Backward-compatible SessionStatus (string union)
  * SDK uses object discriminated union - keep compat type until migration
  */
 export type SessionStatus = "pending" | "running" | "completed" | "error" | "idle"
-
-/**
- * Session summary for discovery response
- */
-export interface DiscoveredSession {
-	id: string
-	title: string
-	updatedAt: number
-}
-
-/**
- * Project summary for discovery response
- */
-export interface DiscoveredProject {
-	id: string
-	directory: string
-	name: string
-}
-
-/**
- * Discovered OpenCode server instance
- */
-export interface DiscoveredServer {
-	port: number
-	pid: number
-	directory: string
-	/** Session IDs hosted by this server (when includeSessions=true) */
-	sessions?: string[]
-	/** Full session details (when includeSessionDetails=true) */
-	sessionDetails?: DiscoveredSession[]
-	/** Project info (when includeProjects=true) */
-	project?: DiscoveredProject
-}
 
 /**
  * SSE connection state for observability

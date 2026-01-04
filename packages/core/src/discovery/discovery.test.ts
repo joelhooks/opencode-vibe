@@ -20,8 +20,8 @@ import { Effect, Schedule, Duration, TestClock, TestContext, Fiber } from "effec
 import { Discovery, type DiscoveredServer } from "./types.js"
 import { DiscoveryBrowserLive, makeTestLayer } from "./discovery.js"
 
-describe("ServerDiscovery - One-shot discovery", () => {
-	test("discover() returns servers with url field added", async () => {
+describe("Discovery Browser - One-shot discovery", () => {
+	test("discover() returns servers from API", async () => {
 		// Mock API response
 		const mockFetch = async () =>
 			Response.json([
@@ -30,7 +30,7 @@ describe("ServerDiscovery - One-shot discovery", () => {
 			])
 
 		const program = Effect.gen(function* () {
-			const discovery = yield* ServerDiscovery
+			const discovery = yield* Discovery
 			return yield* discovery.discover()
 		})
 
@@ -40,13 +40,13 @@ describe("ServerDiscovery - One-shot discovery", () => {
 		expect(result).toEqual([
 			{
 				port: 4056,
+				pid: 12345,
 				directory: "/Users/joel/Code/project1",
-				url: "/api/opencode/4056",
 			},
 			{
 				port: 4057,
+				pid: 12346,
 				directory: "/Users/joel/Code/project2",
-				url: "/api/opencode/4057",
 			},
 		])
 	})
@@ -58,7 +58,7 @@ describe("ServerDiscovery - One-shot discovery", () => {
 		}
 
 		const program = Effect.gen(function* () {
-			const discovery = yield* ServerDiscovery
+			const discovery = yield* Discovery
 			return yield* discovery.discover()
 		})
 
@@ -73,7 +73,7 @@ describe("ServerDiscovery - One-shot discovery", () => {
 		const mockFetch = async () => new Response("Internal Server Error", { status: 500 })
 
 		const program = Effect.gen(function* () {
-			const discovery = yield* ServerDiscovery
+			const discovery = yield* Discovery
 			return yield* discovery.discover()
 		})
 
@@ -88,7 +88,7 @@ describe("ServerDiscovery - One-shot discovery", () => {
 		const mockFetch = async () => new Response("not json", { status: 200 })
 
 		const program = Effect.gen(function* () {
-			const discovery = yield* ServerDiscovery
+			const discovery = yield* Discovery
 			return yield* discovery.discover()
 		})
 
@@ -103,7 +103,7 @@ describe("ServerDiscovery - One-shot discovery", () => {
 		const mockFetch = async () => Response.json([])
 
 		const program = Effect.gen(function* () {
-			const discovery = yield* ServerDiscovery
+			const discovery = yield* Discovery
 			return yield* discovery.discover()
 		})
 
@@ -122,7 +122,7 @@ describe("ServerDiscovery - One-shot discovery", () => {
 		}
 
 		const program = Effect.gen(function* () {
-			const discovery = yield* ServerDiscovery
+			const discovery = yield* Discovery
 			return yield* discovery.discover()
 		})
 
@@ -138,12 +138,12 @@ describe("ServerDiscovery - One-shot discovery", () => {
 			Response.json([
 				{ port: 4056, pid: 12345, directory: "/Users/joel/Code/project1" },
 				{ port: "invalid", pid: 12346, directory: "/Users/joel/Code/project2" }, // Invalid port
-				{ port: 4058, directory: "/Users/joel/Code/project3" }, // Missing pid (OK - we don't use it)
-				{ port: 4059, pid: 12348 }, // Missing directory
+				{ port: 4058, directory: "/Users/joel/Code/project3" }, // Missing pid - INVALID
+				{ port: 4059, pid: 12348 }, // Missing directory - INVALID
 			])
 
 		const program = Effect.gen(function* () {
-			const discovery = yield* ServerDiscovery
+			const discovery = yield* Discovery
 			return yield* discovery.discover()
 		})
 
@@ -153,13 +153,162 @@ describe("ServerDiscovery - One-shot discovery", () => {
 		expect(result).toEqual([
 			{
 				port: 4056,
+				pid: 12345,
 				directory: "/Users/joel/Code/project1",
-				url: "/api/opencode/4056",
 			},
+		])
+	})
+})
+
+describe("Discovery Browser - DiscoveryOptions support", () => {
+	test("passes includeSessions as query param", async () => {
+		let calledUrl: string | undefined
+
+		const mockFetch = async (input: RequestInfo | URL) => {
+			calledUrl = input.toString()
+			return Response.json([])
+		}
+
+		const program = Effect.gen(function* () {
+			const discovery = yield* Discovery
+			return yield* discovery.discover({ includeSessions: true })
+		})
+
+		const testLayer = makeTestLayer(mockFetch as any)
+		await Effect.runPromise(program.pipe(Effect.provide(testLayer)))
+
+		expect(calledUrl).toBe("/api/opencode/servers?includeSessions=true")
+	})
+
+	test("passes includeSessionDetails as query param", async () => {
+		let calledUrl: string | undefined
+
+		const mockFetch = async (input: RequestInfo | URL) => {
+			calledUrl = input.toString()
+			return Response.json([])
+		}
+
+		const program = Effect.gen(function* () {
+			const discovery = yield* Discovery
+			return yield* discovery.discover({ includeSessionDetails: true })
+		})
+
+		const testLayer = makeTestLayer(mockFetch as any)
+		await Effect.runPromise(program.pipe(Effect.provide(testLayer)))
+
+		expect(calledUrl).toBe("/api/opencode/servers?includeSessionDetails=true")
+	})
+
+	test("passes includeProjects as query param", async () => {
+		let calledUrl: string | undefined
+
+		const mockFetch = async (input: RequestInfo | URL) => {
+			calledUrl = input.toString()
+			return Response.json([])
+		}
+
+		const program = Effect.gen(function* () {
+			const discovery = yield* Discovery
+			return yield* discovery.discover({ includeProjects: true })
+		})
+
+		const testLayer = makeTestLayer(mockFetch as any)
+		await Effect.runPromise(program.pipe(Effect.provide(testLayer)))
+
+		expect(calledUrl).toBe("/api/opencode/servers?includeProjects=true")
+	})
+
+	test("passes timeout as query param", async () => {
+		let calledUrl: string | undefined
+
+		const mockFetch = async (input: RequestInfo | URL) => {
+			calledUrl = input.toString()
+			return Response.json([])
+		}
+
+		const program = Effect.gen(function* () {
+			const discovery = yield* Discovery
+			return yield* discovery.discover({ timeout: 1000 })
+		})
+
+		const testLayer = makeTestLayer(mockFetch as any)
+		await Effect.runPromise(program.pipe(Effect.provide(testLayer)))
+
+		expect(calledUrl).toBe("/api/opencode/servers?timeout=1000")
+	})
+
+	test("passes multiple options as query params", async () => {
+		let calledUrl: string | undefined
+
+		const mockFetch = async (input: RequestInfo | URL) => {
+			calledUrl = input.toString()
+			return Response.json([])
+		}
+
+		const program = Effect.gen(function* () {
+			const discovery = yield* Discovery
+			return yield* discovery.discover({
+				includeSessions: true,
+				includeProjects: true,
+				timeout: 500,
+			})
+		})
+
+		const testLayer = makeTestLayer(mockFetch as any)
+		await Effect.runPromise(program.pipe(Effect.provide(testLayer)))
+
+		expect(calledUrl).toBe(
+			"/api/opencode/servers?includeSessions=true&includeProjects=true&timeout=500",
+		)
+	})
+
+	test("returns servers with optional metadata when requested", async () => {
+		const mockFetch = async () =>
+			Response.json([
+				{
+					port: 4056,
+					pid: 12345,
+					directory: "/Users/joel/Code/project1",
+					sessions: ["sess-1", "sess-2"],
+					sessionDetails: [
+						{ id: "sess-1", title: "Session 1", updatedAt: 1000 },
+						{ id: "sess-2", title: "Session 2", updatedAt: 2000 },
+					],
+					project: {
+						id: "proj-1",
+						directory: "/Users/joel/Code/project1",
+						name: "project1",
+					},
+				},
+			])
+
+		const program = Effect.gen(function* () {
+			const discovery = yield* Discovery
+			return yield* discovery.discover({
+				includeSessions: true,
+				includeSessionDetails: true,
+				includeProjects: true,
+			})
+		})
+
+		const testLayer = makeTestLayer(mockFetch as any)
+		const result = await Effect.runPromise(program.pipe(Effect.provide(testLayer)))
+
+		expect(result).toEqual([
 			{
-				port: 4058,
-				directory: "/Users/joel/Code/project3",
-				url: "/api/opencode/4058",
+				port: 4056,
+				pid: 12345,
+				directory: "/Users/joel/Code/project1",
+				sessions: ["sess-1", "sess-2"],
+				sessionDetails: [
+					{ id: "sess-1", title: "Session 1", updatedAt: 1000 },
+					{ id: "sess-2", title: "Session 2", updatedAt: 2000 },
+				],
+				project: {
+					id: "proj-1",
+					directory: "/Users/joel/Code/project1",
+					name: "project1",
+				},
 			},
 		])
 	})
@@ -169,7 +318,7 @@ describe("ServerDiscovery - One-shot discovery", () => {
 // CHARACTERIZATION TESTS: Schedule.repeat polling loop
 // ============================================================================
 
-describe("ServerDiscovery - Polling Loop (Schedule.repeat)", () => {
+describe("Discovery Browser - Polling Loop (Schedule.repeat)", () => {
 	/**
 	 * Test 1: Polling interval timing
 	 *
@@ -197,7 +346,7 @@ describe("ServerDiscovery - Polling Loop (Schedule.repeat)", () => {
 		const testLayer = makeTestLayer(mockFetch as any)
 
 		const program = Effect.gen(function* () {
-			const discovery = yield* ServerDiscovery
+			const discovery = yield* Discovery
 
 			// Poll with 100ms interval, collect 3 calls using recurs(2) for 2 repeats
 			yield* discovery.discover().pipe(
@@ -253,7 +402,7 @@ describe("ServerDiscovery - Polling Loop (Schedule.repeat)", () => {
 		const testLayer = makeTestLayer(mockFetch as any)
 
 		const program = Effect.gen(function* () {
-			const discovery = yield* ServerDiscovery
+			const discovery = yield* Discovery
 
 			// Start infinite polling loop
 			const pollEffect = discovery
@@ -310,14 +459,14 @@ describe("ServerDiscovery - Polling Loop (Schedule.repeat)", () => {
 				errors.push(error)
 				throw error
 			}
-			return Response.json([{ port: 4056, directory: "/test" }])
+			return Response.json([{ port: 4056, pid: 99999, directory: "/test" }])
 		}
 
 		const testLayer = makeTestLayer(mockFetch as any)
 
 		const program = Effect.gen(function* () {
-			const discovery = yield* ServerDiscovery
-			const results: ServerInfo[][] = []
+			const discovery = yield* Discovery
+			const results: DiscoveredServer[][] = []
 
 			// Poll 3 times, collecting results
 			yield* discovery.discover().pipe(
@@ -341,8 +490,8 @@ describe("ServerDiscovery - Polling Loop (Schedule.repeat)", () => {
 		expect(results[2]).toEqual([
 			{
 				port: 4056,
+				pid: 99999,
 				directory: "/test",
-				url: "/api/opencode/4056",
 			},
 		])
 	})
@@ -364,7 +513,7 @@ describe("ServerDiscovery - Polling Loop (Schedule.repeat)", () => {
 		const testLayer = makeTestLayer(mockFetch as any)
 
 		const program = Effect.gen(function* () {
-			const discovery = yield* ServerDiscovery
+			const discovery = yield* Discovery
 
 			// Exponential: 100ms, 200ms, 400ms, capped at 500ms
 			const schedule = Schedule.exponential(Duration.millis(100)).pipe(
@@ -399,7 +548,7 @@ describe("ServerDiscovery - Polling Loop (Schedule.repeat)", () => {
 		const testLayer = makeTestLayer(mockFetch as any)
 
 		const program = Effect.gen(function* () {
-			const discovery = yield* ServerDiscovery
+			const discovery = yield* Discovery
 
 			// Start polling with 1 second interval
 			const pollEffect = discovery
