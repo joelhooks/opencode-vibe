@@ -55,6 +55,32 @@ function isActiveSession(session: EnrichedSession): boolean {
 }
 
 /**
+ * Get color function for session status
+ *
+ * Color coding:
+ * - 🟢 green (running/pending) - actively processing
+ * - 🟡 yellow (error) - retrying or needs attention
+ * - ⚪ gray (completed/idle) - inactive
+ *
+ * @param status - Session status
+ * @returns Chalk color function
+ */
+function getStatusColor(status: EnrichedSession["status"]) {
+	switch (status) {
+		case "running":
+		case "pending":
+			return chalk.green
+		case "error":
+			return chalk.yellow
+		case "completed":
+		case "idle":
+			return chalk.gray
+		default:
+			return chalk.gray
+	}
+}
+
+/**
  * Format a session row
  *
  * Format: 🟢/⚪ title relativeTime contextPct%
@@ -76,7 +102,13 @@ export function formatSessionRow(session: HierarchicalSession, depth = 0): strin
 	if (title.length > maxTitleLength) {
 		title = `${title.slice(0, maxTitleLength - 3)}...`
 	}
+
+	// Pad BEFORE applying color (ANSI codes don't count toward visual length)
 	const titlePadded = title.padEnd(maxTitleLength, " ")
+
+	// Apply color based on status
+	const colorFn = getStatusColor(session.status)
+	const titleColored = colorFn(titlePadded)
 
 	// Relative time (right-aligned in 8 chars)
 	const relativeTime = formatRelativeTime(session.time.updated)
@@ -89,7 +121,7 @@ export function formatSessionRow(session: HierarchicalSession, depth = 0): strin
 	// Indent: base 3 spaces + 3 per depth level
 	const indent = "   " + "   ".repeat(depth)
 
-	return `${indent}${treePrefix}${indicator} ${titlePadded} ${timePadded}   ${usagePadded}`
+	return `${indent}${treePrefix}${indicator} ${titleColored} ${timePadded}   ${usagePadded}`
 }
 
 /**
