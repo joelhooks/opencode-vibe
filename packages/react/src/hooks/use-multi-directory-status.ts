@@ -4,6 +4,12 @@
  * Returns session status (running/completed) for all sessions across multiple directories.
  * Implements cooldown logic to keep "running" indicator lit for 1 minute after streaming ends.
  *
+ * MIGRATION NOTE (opencode-next--xts0a-mjz41bm4b8w):
+ * - Migrated from Zustand to World Stream
+ * - Now uses useWorld() for reactive state
+ * - Removed bootstrap logic (World Stream handles initial state)
+ * - Kept cooldown logic for UX smoothness
+ *
  * @example
  * ```tsx
  * const { sessionStatuses, lastActivity } = useMultiDirectoryStatus(["/project1", "/project2"])
@@ -14,11 +20,9 @@
 
 "use client"
 
-import { useEffect, useState, useRef } from "react"
-import { useOpencodeStore } from "../store"
-import type { SessionStatus } from "../store/types"
-import { createClient } from "@opencode-vibe/core/client"
-import { computeStatusSync } from "@opencode-vibe/core/api"
+import { useEffect, useState, useRef, useMemo } from "react"
+import { useWorld } from "./use-world"
+import type { SessionStatus } from "@opencode-vibe/core/types"
 
 /**
  * How long to keep "running" indicator lit after streaming ends
@@ -32,28 +36,6 @@ import { computeStatusSync } from "@opencode-vibe/core/api"
  */
 const IDLE_COOLDOWN_MS = 60_000 // 1 minute
 
-/**
- * Derive bootstrap session status from API messages
- * A session is "busy" if the last message is an assistant message without a completed time
- *
- * @deprecated Use deriveSessionStatus from status-utils.ts for store-based status
- */
-function deriveBootstrapStatus(
-	messages: Array<{
-		info: { role: string; time?: { created: number; completed?: number } }
-	}>,
-): "running" | "completed" {
-	const lastMessage = messages[messages.length - 1]
-	if (!lastMessage) return "completed"
-
-	// Session is busy if last message is assistant without completed time
-	if (lastMessage.info.role === "assistant" && !lastMessage.info.time?.completed) {
-		return "running"
-	}
-
-	return "completed"
-}
-
 export interface UseMultiDirectoryStatusReturn {
 	/** Map of sessionId -> status */
 	sessionStatuses: Record<string, SessionStatus>
@@ -64,18 +46,17 @@ export interface UseMultiDirectoryStatusReturn {
 /**
  * Hook to manage session statuses across multiple directories
  *
- * **Two-phase approach**:
- * 1. **Bootstrap** (on mount): Fetches status for recent sessions (< 5min old)
- *    by checking if their last message is an incomplete assistant message.
- * 2. **SSE subscription**: Subscribes to store updates (which are fed by useSSEEvents)
- *    to get real-time session.status events.
+ * **Migrated to World Stream** (opencode-next--xts0a-mjz41bm4b8w):
+ * - Uses useWorld() for reactive state (replaces Zustand subscription)
+ * - World Stream provides computed status via EnrichedSession
+ * - Removed bootstrap logic (World Stream handles initial state)
  *
  * **Cooldown logic**: When a session becomes idle (status = "completed"),
  * the green indicator stays lit for 1 minute before fading. This prevents
  * flickering when AI streaming pauses briefly between chunks.
  *
  * @param directories - Array of directory paths with sessions to track
- * @param initialSessions - Optional initial session data for bootstrap (format: { dir: [{ id, formattedTime }] })
+ * @param initialSessions - DEPRECATED - no longer used (kept for backward compat)
  * @returns Object with sessionStatuses and lastActivity maps
  */
 export function useMultiDirectoryStatus(
@@ -85,7 +66,6 @@ export function useMultiDirectoryStatus(
 	const [sessionStatuses, setSessionStatuses] = useState<Record<string, SessionStatus>>({})
 	const [lastActivity, setLastActivity] = useState<Record<string, number>>({})
 
-	const bootstrappedRef = useRef(false)
 	const cooldownTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
 	// Cleanup all timers on unmount
@@ -97,175 +77,80 @@ export function useMultiDirectoryStatus(
 		}
 	}, [])
 
-	// Bootstrap session statuses for recent sessions on mount
-	useEffect(() => {
-		if (bootstrappedRef.current) return
-		bootstrappedRef.current = true
+	// Get world state
+	const world = useWorld()
 
-		async function bootstrap() {
-			if (!initialSessions) return
-
-			// Fetch status for each directory in parallel
-			await Promise.all(
-				directories.map(async (directory) => {
-					try {
-						const client = await createClient(directory)
-
-						// Fetch SDK session.status() for REAL status (not inferred)
-						const statusResponse = await client.session.status()
-						const backendStatusMap =
-							(statusResponse.data as Record<string, { type: "idle" | "busy" | "retry" }> | null) ||
-							{}
-
-						// Normalize backend status format to SessionStatus
-						const normalizedStatuses: Record<string, SessionStatus> = {}
-						for (const [sessionId, backendStatus] of Object.entries(backendStatusMap)) {
-							if (backendStatus.type === "busy" || backendStatus.type === "retry") {
-								normalizedStatuses[sessionId] = "running"
-							} else {
-								normalizedStatuses[sessionId] = "completed"
-							}
-						}
-
-						// Merge into state
-						setSessionStatuses((prev) => ({
-							...prev,
-							...normalizedStatuses,
-						}))
-					} catch (error) {
-						console.error(`Failed to fetch status for ${directory}:`, error)
-					}
-				}),
-			)
-		}
-
-		bootstrap()
-	}, [directories, initialSessions])
+	// Filter sessions by requested directories
+	const filteredSessions = useMemo(() => {
+		const directorySet = new Set(directories)
+		return world.sessions.filter((s) => directorySet.has(s.directory))
+	}, [world.sessions, directories])
 
 	/**
-	 * Subscribe to session status changes from store using Core API
-	 *
-	 * Uses Core's computeStatusSync for consistent three-source status derivation:
-	 * 1. sessionStatus map (SSE events)
-	 * 2. Sub-agent activity (task parts with state.status="running")
-	 * 3. Last message check (not used here - bootstrap only)
-	 *
-	 * **Batch selector pattern**: Single subscription gathers all session IDs,
-	 * then derives status for each using Core API synchronously. This avoids
-	 * Rules of Hooks violations (can't call hooks in loops).
+	 * Subscribe to session status changes from World Stream
 	 *
 	 * **Cooldown logic**:
 	 * - When status = "running": Immediately set to "running", cancel any pending cooldown
 	 * - When status = "completed": Start 1-minute cooldown timer, keep indicator green until timer expires
 	 *
-	 * **Metadata change detection** (VERIFIED bd-opencode-next--xts0a-mjvwegx7d89):
-	 * - Store handler uses full replacement: parts[index] = part (not parts[index].state = ...)
-	 * - Immer produces new object references on ANY nested mutation (including metadata changes)
-	 * - Zustand subscription triggers on any state change → computeStatusSync re-runs
-	 * - computeStatusSync checks part.state.status (not metadata), so metadata changes don't affect status
-	 * - BUT: Subscription ensures we re-compute immediately when part.state.status does change
-	 * - Characterization test confirms: metadata changes trigger re-computation as expected
+	 * MIGRATION NOTE (opencode-next--xts0a-mjz41bm4b8w):
+	 * - Replaced Zustand subscription with World Stream
+	 * - World Stream already provides computed status via EnrichedSession
+	 * - Removed computeStatusSync call (Core handles this now)
 	 */
 	useEffect(() => {
-		const directorySet = new Set(directories)
+		for (const session of filteredSessions) {
+			const { id: sessionId, status: statusValue, lastActivityAt } = session
 
-		const unsubscribe = useOpencodeStore.subscribe((state) => {
-			for (const directory of directorySet) {
-				const dirState = state.directories[directory]
-				if (!dirState) continue
+			// Debug log status changes
+			const prevStatus = sessionStatuses[sessionId]
+			if (prevStatus !== statusValue) {
+				console.debug("[useMultiDirectoryStatus] status changed:", {
+					sessionId,
+					prevStatus,
+					newStatus: statusValue,
+					directory: session.directory,
+				})
+			}
 
-				// Get all session IDs from this directory
-				const allSessionIds = new Set([
-					...Object.keys(dirState.sessionStatus || {}),
-					...Object.keys(dirState.messages || {}),
-				])
+			if (statusValue === "running") {
+				// Cancel any pending cooldown
+				const existingTimer = cooldownTimersRef.current.get(sessionId)
+				if (existingTimer) {
+					clearTimeout(existingTimer)
+					cooldownTimersRef.current.delete(sessionId)
+				}
 
-				// Derive status for each session using Core API
-				for (const sessionId of allSessionIds) {
-					// Collect messages and parts for this session
-					const sessionMessages = dirState.messages[sessionId] || []
-					const messages = sessionMessages.map((m) => ({
-						id: m.id,
-						role: m.role || "user",
-						time: m.time,
-					}))
-					const parts = sessionMessages.flatMap((msg) =>
-						(dirState.parts[msg.id] || []).map((p) => ({
-							messageId: p.messageID,
-							type: p.type,
-							tool: p.tool as string | undefined,
-							state: p.state as { status?: string } | undefined,
-						})),
-					)
+				setSessionStatuses((prev) => ({
+					...prev,
+					[sessionId]: "running",
+				}))
+				setLastActivity((prev) => ({
+					...prev,
+					[sessionId]: lastActivityAt,
+				}))
+			} else if (statusValue === "completed") {
+				// Update last activity
+				setLastActivity((prev) => ({
+					...prev,
+					[sessionId]: lastActivityAt,
+				}))
 
-					// Call Core API to compute status synchronously
-					const statusValue = computeStatusSync(
-						sessionId,
-						dirState.sessionStatus || {},
-						messages,
-						parts,
-						{
-							includeSubAgents: true,
-							includeLastMessage: false, // Only for bootstrap
-						},
-					)
-
-					// Debug log status changes
-					const prevStatus = sessionStatuses[sessionId]
-					if (prevStatus !== statusValue) {
-						console.debug("[useMultiDirectoryStatus] status changed:", {
-							sessionId,
-							prevStatus,
-							newStatus: statusValue,
-							directory,
-						})
-					}
-
-					if (statusValue === "running") {
-						// Cancel any pending cooldown
-						const existingTimer = cooldownTimersRef.current.get(sessionId)
-						if (existingTimer) {
-							clearTimeout(existingTimer)
-							cooldownTimersRef.current.delete(sessionId)
-						}
-
+				// Start cooldown only if not already in cooldown
+				if (!cooldownTimersRef.current.has(sessionId)) {
+					const timer = setTimeout(() => {
 						setSessionStatuses((prev) => ({
 							...prev,
-							[sessionId]: "running",
+							[sessionId]: "completed",
 						}))
-						setLastActivity((prev) => ({
-							...prev,
-							[sessionId]: Date.now(),
-						}))
-					} else if (statusValue === "completed") {
-						// Update last activity
-						setLastActivity((prev) => ({
-							...prev,
-							[sessionId]: Date.now(),
-						}))
+						cooldownTimersRef.current.delete(sessionId)
+					}, IDLE_COOLDOWN_MS)
 
-						// Start cooldown
-						const existingTimer = cooldownTimersRef.current.get(sessionId)
-						if (existingTimer) {
-							clearTimeout(existingTimer)
-						}
-
-						const timer = setTimeout(() => {
-							setSessionStatuses((prev) => ({
-								...prev,
-								[sessionId]: "completed",
-							}))
-							cooldownTimersRef.current.delete(sessionId)
-						}, IDLE_COOLDOWN_MS)
-
-						cooldownTimersRef.current.set(sessionId, timer)
-					}
+					cooldownTimersRef.current.set(sessionId, timer)
 				}
 			}
-		})
-
-		return unsubscribe
-	}, [directories, sessionStatuses])
+		}
+	}, [filteredSessions, sessionStatuses])
 
 	return { sessionStatuses, lastActivity }
 }
