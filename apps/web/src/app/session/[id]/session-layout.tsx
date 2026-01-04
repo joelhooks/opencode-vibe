@@ -4,14 +4,13 @@ import { useState, createContext, useContext } from "react"
 import Link from "next/link"
 import type { UIMessage } from "ai"
 import { toast } from "sonner"
-import { OpencodeSSRPlugin } from "@opencode-vibe/react"
 import {
-	useSession,
-	useMessages,
-	useSessionStatus,
+	OpencodeSSRPlugin,
+	useSessionData,
+	useMessagesWithParts,
 	useSendMessage,
-	useSSEEvents,
-} from "@/app/hooks"
+} from "@opencode-vibe/react"
+import { useWorldSessionStatus } from "@opencode-vibe/react/hooks"
 import { NewSessionButton } from "./new-session-button"
 import { SessionMessages } from "./session-messages"
 import { PromptInput } from "@/components/prompt"
@@ -114,24 +113,23 @@ function SessionContent({
 	const [debugPanelOpen, setDebugPanelOpen] = useState(false)
 	const toggleDebugPanel = () => setDebugPanelOpen((prev) => !prev)
 
-	// Start SSE and wire events to store - CRITICAL for real-time updates
-	useSSEEvents()
-
-	// Use individual factory hooks
-	const sessionData = useSession(sessionId)
-	const messages = useMessages(sessionId)
-	const status = useSessionStatus(sessionId)
+	// World Stream hooks - SSE events flow automatically via World Stream
+	const sessionData = useSessionData(sessionId)
+	const messagesWithParts = useMessagesWithParts(sessionId)
+	const status = useWorldSessionStatus(sessionId)
 	const running = status === "running"
 
-	const { sendMessage, isPending: isLoading } = useSendMessage({
+	const { sendMessage, isLoading, queueLength } = useSendMessage({
 		sessionId,
+		directory,
 	})
 
 	// Fallback to initialSession for SSR hydration
 	const session = sessionData ?? initialSession
 
-	// Queue length (TODO: need to add this to factory if needed)
-	const queueLength = 0
+	// Transform messagesWithParts to messages array for display
+	// OpencodeMessage has {info, parts} structure - we just need the count
+	const messages = messagesWithParts
 
 	// Handle prompt submission
 	const handleSubmit = async (parts: Prompt) => {
