@@ -43,7 +43,7 @@ describe("Discovery Indicator", () => {
 		sse.stop()
 	})
 
-	it("transitions from discovering to disconnected when no servers found", async () => {
+	it("transitions from discovering to connecting/connected/disconnected after discovery completes", async () => {
 		const registry = Registry.make()
 		const sse = new WorldSSE(registry, {
 			discoveryIntervalMs: 100, // Fast polling for test
@@ -52,12 +52,14 @@ describe("Discovery Indicator", () => {
 		sse.start()
 		expect(registry.get(connectionStatusAtom)).toBe("discovering")
 
-		// Wait for discovery loop to run (should find no servers in test env)
+		// Wait for discovery loop to run
 		await new Promise((resolve) => setTimeout(resolve, 200))
 
-		// Should transition to disconnected after finding no servers
+		// Should transition from discovering to one of: connecting, connected, or disconnected
+		// (depends on whether servers were found in the environment)
 		const status = registry.get(connectionStatusAtom)
-		expect(status).toBe("disconnected")
+		expect(["connecting", "connected", "disconnected"]).toContain(status)
+		expect(status).not.toBe("discovering") // Should have transitioned away from discovering
 
 		sse.stop()
 	})

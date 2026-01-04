@@ -9,6 +9,9 @@ export { useWorld } from "./use-world"
 export { useWorldSession } from "./use-world-session"
 export { useWorldConnection, type ConnectionStatus } from "./use-world-connection"
 export { useWorldMessages } from "./use-world-messages"
+export { useWorldContextUsage } from "./use-world-context-usage"
+export { useWorldCompactionState } from "./use-world-compaction-state"
+export { useWorldSessionStatus } from "./use-world-session-status"
 
 // Unified Facade
 export {

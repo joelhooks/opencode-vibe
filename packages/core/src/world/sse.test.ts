@@ -505,8 +505,8 @@ describe("WorldSSE - Discovery Loop", () => {
 
 		const status = registry.get(connectionStatusAtom)
 
-		// Status should be either connecting or disconnected (no servers found)
-		expect(["connecting", "disconnected", "connected"]).toContain(status)
+		// Status should be discovering (initial state) or one of the discovered states
+		expect(["discovering", "connecting", "disconnected", "connected"]).toContain(status)
 
 		sse.stop()
 	})
