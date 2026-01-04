@@ -58,8 +58,8 @@ bun run typecheck  # Check types (Turbo)
 - **`packages/core/README.md`** - Core SDK and world stream documentation
 - **`packages/react/README.md`** - React hooks and providers
 - **`docs/adr/`** - Architecture Decision Records
-  - ADR-016: Core Layer Responsibility (Core owns computation, React binds UI)
-  - ADR-018: Reactive World Stream (`createWorldStream()` is THE API)
+  - [ADR-016: Core Layer Responsibility](docs/adr/016-core-layer-responsibility.md) (Core owns computation, React binds UI)
+  - [ADR-018: Reactive World Stream](docs/adr/018-reactive-world-stream.md) (`createWorldStream()` is THE API)
 - **`docs/guides/`** - Implementation guides (SSE sync, mobile, subagents)
 - **`AGENTS.md`** - AI agent conventions and development patterns
 
