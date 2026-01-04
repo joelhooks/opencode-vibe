@@ -193,11 +193,18 @@ export async function run(context: CommandContext): Promise<void> {
 		// Throttle updates (same pattern as watch.ts)
 		let lastUpdate = 0
 		const UPDATE_INTERVAL = 500 // Update at most every 500ms
+		const TIME_REFRESH_INTERVAL = 30000 // Refresh relative times every 30s
+
+		// Store latest world state for periodic re-render
+		let latestWorld: WorldState | null = null
 
 		// Subscribe to world state changes
 		let unsubscribe: (() => void) | undefined
 		unsubscribe = stream.subscribe((world) => {
 			if (!running) return
+
+			// Always store latest world for periodic refresh
+			latestWorld = world
 
 			const now = Date.now()
 
@@ -224,12 +231,25 @@ export async function run(context: CommandContext): Promise<void> {
 			}
 		})
 
+		// Periodic timer to refresh relative times (watch mode only)
+		let timeRefreshInterval: ReturnType<typeof setInterval> | undefined
+		if (!options.once) {
+			timeRefreshInterval = setInterval(() => {
+				if (!running || !latestWorld) return
+				// Re-render with latest world state to update relative times
+				renderWorld(latestWorld, options)
+			}, TIME_REFRESH_INTERVAL)
+		}
+
 		// Keep running until exit (live mode only)
 		if (!options.once) {
 			await new Promise<void>((resolve) => {
 				const checkInterval = setInterval(() => {
 					if (!running) {
 						clearInterval(checkInterval)
+						if (timeRefreshInterval) {
+							clearInterval(timeRefreshInterval)
+						}
 						unsubscribe?.()
 						process.stdin.pause()
 						if (stream) {

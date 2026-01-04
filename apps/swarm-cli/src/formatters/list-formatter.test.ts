@@ -50,17 +50,10 @@ function createSession(overrides: Partial<EnrichedSession> = {}): EnrichedSessio
 
 describe("formatContextUsage", () => {
 	test("shows percentage when usage data exists", () => {
+		// formatContextUsage uses pre-computed contextUsagePercent from Core
+		// (Core applies correct formula: excludes cache.write, accounts for output reserve)
 		const session = createSession({
-			tokens: {
-				input: 1000,
-				output: 500,
-			},
-			model: {
-				limits: {
-					context: 10000,
-					output: 4096,
-				},
-			},
+			contextUsagePercent: 15,
 		})
 
 		const result = formatContextUsage(session)
@@ -102,21 +95,14 @@ describe("formatContextUsage", () => {
 	})
 
 	test("rounds percentage to whole number", () => {
+		// formatContextUsage uses pre-computed contextUsagePercent from Core
+		// Core already rounds the percentage
 		const session = createSession({
-			tokens: {
-				input: 123,
-				output: 456,
-			},
-			model: {
-				limits: {
-					context: 10000,
-					output: 4096,
-				},
-			},
+			contextUsagePercent: 6,
 		})
 
 		const result = formatContextUsage(session)
-		expect(result).toBe("6%") // (123 + 456) / 10000 = 5.79% -> 6%
+		expect(result).toBe("6%")
 	})
 })
 
@@ -128,23 +114,14 @@ describe("formatSessionRow", () => {
 				created: Date.now() - 120000, // 2 minutes ago
 				updated: Date.now() - 120000,
 			},
-			tokens: {
-				input: 4500,
-				output: 2000,
-			},
-			model: {
-				limits: {
-					context: 10000,
-					output: 4096,
-				},
-			},
+			contextUsagePercent: 65, // Pre-computed by Core
 		})
 
 		const result = formatSessionRow(session)
 		// Should contain: indicator, title, status (inferred), relative time, percentage
 		expect(result).toContain("Implement feature")
 		expect(result).toContain("2m ago")
-		expect(result).toContain("65%") // (4500 + 2000) / 10000
+		expect(result).toContain("65%")
 	})
 
 	test("truncates long titles with ellipsis", () => {
