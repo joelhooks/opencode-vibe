@@ -25,28 +25,15 @@ import type { ContextUsage } from "../../store/types"
 import { useOpencodeStore } from "../../store"
 import { useOpencode } from "../../providers"
 import { useWorldContextUsage } from "../use-world-context-usage.js"
-
-/**
- * Default context usage state when no data exists yet
- */
-const DEFAULT_CONTEXT_USAGE: ContextUsage = {
-	used: 0,
-	limit: 200000,
-	percentage: 0,
-	isNearLimit: false,
-	tokens: {
-		input: 0,
-		output: 0,
-		cached: 0,
-	},
-	lastUpdated: 0,
-}
+import { getContextUsage as getContextUsageHelper } from "../../lib/delegation-helpers"
 
 /**
  * Hook to get context usage for a session
  *
  * Delegates to World Stream first, falls back to Zustand if undefined.
  * This enables gradual migration from Zustand to World Stream.
+ *
+ * Uses shared delegation helper for DRY with factory.
  *
  * @param sessionId - Session ID to get context usage for
  * @returns Context usage state with token counts, limit, percentage
@@ -57,22 +44,11 @@ export function useContextUsage(sessionId: string): ContextUsage {
 	// Try World Stream first
 	const worldValue = useWorldContextUsage(sessionId)
 
-	// Fallback to Zustand if World Stream doesn't have it
-	const zustandValue = useOpencodeStore(
-		(state) => state.directories[directory]?.contextUsage[sessionId],
-	)
+	// Get full store state (needed by helper)
+	const store = useOpencodeStore()
 
-	// Prefer World Stream, fallback to Zustand
-	if (worldValue !== undefined) {
-		return worldValue
-	}
-
-	// Log fallback for debugging (remove in Phase 5)
-	if (zustandValue !== undefined) {
-		console.debug("[useContextUsage] Falling back to Zustand for", sessionId)
-	}
-
-	return zustandValue ?? DEFAULT_CONTEXT_USAGE
+	// Use shared delegation helper
+	return getContextUsageHelper(worldValue, store, sessionId, directory)
 }
 
 // Re-export formatTokens from Core for backwards compatibility
