@@ -322,7 +322,19 @@ describe("useOpencodeStore", () => {
 		})
 	})
 
-	describe("multi-directory session status", () => {
+	/**
+	 * REMOVED: multi-directory session status tests
+	 *
+	 * These tests verified that Zustand store updated sessionStatus/sessionLastActivity
+	 * fields from SSE events. Those fields were removed in Phase 6.1 cleanup because:
+	 * - World Stream now provides session.status (EnrichedSession.status)
+	 * - Hooks read from World Stream, not Zustand
+	 * - The Zustand fields were write-only (SSE updated them, nothing read them)
+	 *
+	 * Related: opencode-next--xts0a-mjz41bm4b8w (Migrate useMultiDirectoryStatus to World Stream)
+	 */
+
+	// describe("multi-directory session status", () => {
 		it("should update session status in directory B even when directory A was initialized first", () => {
 			const store = useOpencodeStore.getState()
 

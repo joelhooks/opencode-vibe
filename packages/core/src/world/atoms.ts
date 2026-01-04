@@ -823,7 +823,10 @@ function deriveWorldStateFromData(data: WorldStateData): WorldState {
 		const lastActivityAt = Math.max(lastMessageTime, session.time.updated)
 
 		// Context usage percent - compute from last assistant message tokens
-		// Total tokens = input + output + reasoning + cache.read + cache.write
+		// CRITICAL: cache.write is billing-only, does NOT consume context
+		// Formula: used = input + output + reasoning + cache.read (excludes cache.write)
+		//          usableContext = limit - min(outputLimit, 32K)
+		//          percentage = round((used / usableContext) * 100)
 		let contextUsagePercent = 0
 		let contextUsage: ContextUsage | undefined = undefined
 		for (let i = sessionMessages.length - 1; i >= 0; i--) {
@@ -831,16 +834,25 @@ function deriveWorldStateFromData(data: WorldStateData): WorldState {
 			if (msg.role === "assistant" && msg.tokens && msg.model?.limits?.context) {
 				const inputTokens = msg.tokens.input
 				const outputTokens = msg.tokens.output
-				const cachedTokens = (msg.tokens.cache?.read ?? 0) + (msg.tokens.cache?.write ?? 0)
-				const totalTokens = inputTokens + outputTokens + (msg.tokens.reasoning ?? 0) + cachedTokens
-				const percentage = (totalTokens / msg.model.limits.context) * 100
+				const reasoningTokens = msg.tokens.reasoning ?? 0
+				const cachedTokens = msg.tokens.cache?.read ?? 0 // Only cache.read counts
+
+				// Step 1: Sum tokens that count toward context (excludes cache.write)
+				const used = inputTokens + outputTokens + reasoningTokens + cachedTokens
+
+				// Step 2: Calculate usable context (reserve space for output, cap at 32K)
+				const outputReserve = Math.min(msg.model.limits.output ?? 16000, 32000)
+				const usableContext = msg.model.limits.context - outputReserve
+
+				// Step 3: Calculate percentage
+				const percentage = Math.round((used / usableContext) * 100)
 
 				// Backward compat
 				contextUsagePercent = percentage
 
 				// New detailed context usage
 				contextUsage = {
-					used: totalTokens,
+					used,
 					limit: msg.model.limits.context,
 					percentage,
 					isNearLimit: percentage > 80,

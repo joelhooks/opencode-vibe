@@ -123,14 +123,9 @@ export type CompactionState = {
 export interface DirectoryState {
 	ready: boolean
 	sessions: Session[]
-	sessionStatus: Record<string, SessionStatus>
-	sessionLastActivity: Record<string, number> // Timestamp of last status change
-	sessionDiff: Record<string, FileDiff[]>
 	todos: Record<string, Todo[]>
 	messages: Record<string, Message[]>
 	parts: Record<string, Part[]>
-	contextUsage: Record<string, ContextUsage>
-	compaction: Record<string, CompactionState>
 	modelLimits: Record<string, { context: number; output: number }>
 }
 

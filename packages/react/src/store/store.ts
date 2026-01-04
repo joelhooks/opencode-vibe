@@ -164,21 +164,15 @@ type OpencodeActions = {
  *
  * @remarks
  * Key fields:
- * - `sessionStatus`: Map of sessionId -> SessionStatus ("running" | "completed")
- * - `sessionLastActivity`: Map of sessionId -> timestamp for sorting
  * - `sessions`, `messages`, `parts`: Sorted arrays for O(log n) binary search
+ * - `modelLimits`: Cached model context/output limits for offline usage
  */
 const createEmptyDirectoryState = (): DirectoryState => ({
 	ready: false,
 	sessions: [],
-	sessionStatus: {},
-	sessionLastActivity: {},
-	sessionDiff: {},
 	todos: {},
 	messages: {},
 	parts: {},
-	contextUsage: {},
-	compaction: {},
 	modelLimits: {},
 })
 
@@ -286,28 +280,23 @@ export const useOpencodeStore = create<OpencodeState & OpencodeActions>()(
 
 					case "session.status": {
 						/**
-						 * Handle session status updates
-						 *
-						 * Status is already normalized to SessionStatus ("running" | "completed")
-						 * by Core layer's normalizeStatus() utility.
+						 * Session status is now handled by World Stream (ADR-018)
+						 * This event is ignored - status comes from world.sessions[].status
 						 */
-						const status = event.properties.status as SessionStatus
-						const sessionID = event.properties.sessionID
-
-						console.debug("[store] session.status received:", {
-							sessionID,
-							status,
+						console.debug("[store] session.status ignored (handled by World Stream):", {
+							sessionID: event.properties.sessionID,
+							status: event.properties.status,
 							directory,
 						})
-
-						dir.sessionStatus[sessionID] = status
-						// Track last activity time for sorting
-						dir.sessionLastActivity[sessionID] = Date.now()
 						break
 					}
 
 					case "session.diff": {
-						dir.sessionDiff[event.properties.sessionID] = event.properties.diff
+						/**
+						 * Session diff is now handled by World Stream (ADR-018)
+						 * This event is ignored - diff comes from world.sessions[].diff
+						 */
+						console.debug("[store] session.diff ignored (handled by World Stream)")
 						break
 					}
 
@@ -321,11 +310,11 @@ export const useOpencodeStore = create<OpencodeState & OpencodeActions>()(
 					}
 
 					case "session.compacted": {
-						const sessionID = event.properties.sessionID
-						// Clear compaction state when compaction completes
-						if (dir.compaction[sessionID]) {
-							delete dir.compaction[sessionID]
-						}
+						/**
+						 * Compaction state is now handled by World Stream (ADR-018)
+						 * This event is ignored - compaction comes from world.sessions[].compactionState
+						 */
+						console.debug("[store] session.compacted ignored (handled by World Stream)")
 						break
 					}
 
@@ -351,46 +340,14 @@ export const useOpencodeStore = create<OpencodeState & OpencodeActions>()(
 							messages.splice(result.index, 0, message)
 						}
 
-						// Extract token usage if available
-						// ONLY use cached limits from store (populated by bootstrap)
-						if (message.tokens) {
-							const tokens = message.tokens
-
-							// Get limits from store cache OR fallback to DEFAULT_MODEL_LIMITS
-							const modelID = message.modelID as string | undefined
-							const limits = modelID
-								? (dir.modelLimits[modelID] ?? DEFAULT_MODEL_LIMITS)
-								: DEFAULT_MODEL_LIMITS
-
-							// Calculate context usage with effectiveLimits
-							const used = tokens.input + (tokens.cache?.read || 0) + tokens.output
-							const usableContext = limits.context - Math.min(limits.output, 32000)
-							const percentage = Math.round((used / usableContext) * 100)
-
-							dir.contextUsage[sessionID] = {
-								used,
-								limit: limits.context,
-								percentage,
-								isNearLimit: percentage >= 80,
-								tokens: {
-									input: tokens.input,
-									output: tokens.output,
-									cached: tokens.cache?.read || 0,
-								},
-								lastUpdated: Date.now(),
-							}
-						}
-
-						// Detect compaction agent message
-						if (message.agent === "compaction" && message.summary === true) {
-							dir.compaction[sessionID] = {
-								isCompacting: true,
-								isAutomatic: false, // Default to false, will be overridden by CompactionPart if it exists
-								startedAt: Date.now(),
-								messageId: message.id,
-								progress: "generating",
-							}
-						}
+						/**
+						 * Context usage and compaction detection removed (ADR-018)
+						 *
+						 * Previously computed contextUsage and detected compaction messages here.
+						 * Now handled by World Stream:
+						 * - contextUsage comes from world.sessions[].contextUsage
+						 * - compactionState comes from world.sessions[].compactionState
+						 */
 						break
 					}
 
@@ -428,29 +385,13 @@ export const useOpencodeStore = create<OpencodeState & OpencodeActions>()(
 							parts.splice(result.index, 0, part)
 						}
 
-						// Detect CompactionPart (type: "compaction")
-						if (part.type === "compaction") {
-							// Find sessionID by looking up the message
-							let sessionID: string | undefined
-							for (const [sid, msgs] of Object.entries(dir.messages)) {
-								if (msgs.find((m) => m.id === messageID)) {
-									sessionID = sid
-									break
-								}
-							}
-
-							if (sessionID) {
-								const isAutomatic = (part as any).auto === true
-
-								dir.compaction[sessionID] = {
-									isCompacting: true,
-									isAutomatic,
-									startedAt: Date.now(),
-									messageId: messageID,
-									progress: "generating",
-								}
-							}
-						}
+						/**
+						 * Compaction part detection removed (ADR-018)
+						 *
+						 * Previously detected CompactionPart (type: "compaction") and set
+						 * dir.compaction[sessionID]. Now handled by World Stream:
+						 * - compactionState comes from world.sessions[].compactionState
+						 */
 						break
 					}
 

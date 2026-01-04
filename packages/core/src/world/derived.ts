@@ -88,18 +88,27 @@ export const worldAtom = Atom.make((get) => {
 		const lastActivityAt = Math.max(lastMessageTime, session.time.updated)
 
 		// Context usage percent - compute from last assistant message tokens
-		// Total tokens = input + output + reasoning + cache.read + cache.write
+		// CRITICAL: cache.write is billing-only, does NOT consume context
+		// Formula: used = input + output + reasoning + cache.read (excludes cache.write)
+		//          usableContext = limit - min(outputLimit, 32K)
+		//          percentage = round((used / usableContext) * 100)
 		let contextUsagePercent = 0
 		for (let i = sessionMessages.length - 1; i >= 0; i--) {
 			const msg = sessionMessages[i]
 			if (msg.role === "assistant" && msg.tokens && msg.model?.limits?.context) {
-				const totalTokens =
+				// Step 1: Sum tokens that count toward context (excludes cache.write)
+				const used =
 					msg.tokens.input +
 					msg.tokens.output +
 					(msg.tokens.reasoning ?? 0) +
-					(msg.tokens.cache?.read ?? 0) +
-					(msg.tokens.cache?.write ?? 0)
-				contextUsagePercent = (totalTokens / msg.model.limits.context) * 100
+					(msg.tokens.cache?.read ?? 0)
+
+				// Step 2: Calculate usable context (reserve space for output, cap at 32K)
+				const outputReserve = Math.min(msg.model.limits.output ?? 16000, 32000)
+				const usableContext = msg.model.limits.context - outputReserve
+
+				// Step 3: Calculate percentage
+				contextUsagePercent = Math.round((used / usableContext) * 100)
 				break
 			}
 		}

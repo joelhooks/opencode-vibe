@@ -29,24 +29,19 @@ export interface ProjectGroup {
 /**
  * Format context usage as percentage
  *
- * @param session - Session with potential token data
+ * Uses pre-computed session.contextUsagePercent from Core layer.
+ * Core applies correct formula: excludes cache.write, accounts for output reserve.
+ *
+ * @param session - Session with pre-computed context usage
  * @returns Percentage string (e.g., "45%") or "--" if data missing
  */
 export function formatContextUsage(session: EnrichedSession): string {
-	// Type guard: check if tokens exist and have required properties
-	const tokens = session.tokens as { input: number; output: number } | undefined
-	const model = session.model as { limits?: { context: number; output: number } } | undefined
-	const contextLimit = model?.limits?.context
-
-	// Guard: missing data
-	if (!tokens || !contextLimit || contextLimit === 0) {
+	// Use pre-computed percentage from Core (correct formula applied)
+	if (session.contextUsagePercent === undefined || session.contextUsagePercent === 0) {
 		return "--"
 	}
 
-	const totalTokens = tokens.input + tokens.output
-	const percentage = Math.round((totalTokens / contextLimit) * 100)
-
-	return `${percentage}%`
+	return `${Math.round(session.contextUsagePercent)}%`
 }
 
 /**
