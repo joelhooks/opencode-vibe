@@ -744,15 +744,13 @@ export function generateOpencodeHelpers<TRouter = any>(config?: OpencodeConfig) 
 	 * ```
 	 */
 	function useCompactionState(sessionId: string): CompactionState {
-		const cfg = getOpencodeConfig(config)
-
 		return useOpencodeStore(
 			useCallback(
 				(state) => {
-					// Factory doesn't have World Stream yet - pass undefined
-					return getCompactionState(undefined, state, sessionId, cfg.directory)
+					// Factory doesn't have World Stream yet - returns default
+					return getCompactionState(undefined)
 				},
-				[sessionId, cfg.directory],
+				[sessionId],
 			),
 		)
 	}
@@ -772,15 +770,13 @@ export function generateOpencodeHelpers<TRouter = any>(config?: OpencodeConfig) 
 	 * ```
 	 */
 	function useContextUsage(sessionId: string): ContextUsage {
-		const cfg = getOpencodeConfig(config)
-
 		return useOpencodeStore(
 			useCallback(
 				(state) => {
-					// Factory doesn't have World Stream yet - pass undefined
-					return getContextUsage(undefined, state, sessionId, cfg.directory)
+					// Factory doesn't have World Stream yet - returns default
+					return getContextUsage(undefined)
 				},
-				[sessionId, cfg.directory],
+				[sessionId],
 			),
 		)
 	}

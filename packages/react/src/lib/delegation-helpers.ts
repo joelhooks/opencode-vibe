@@ -1,14 +1,14 @@
 /**
- * delegation-helpers - Non-hook helpers for World Stream → Zustand delegation
+ * delegation-helpers - Non-hook helpers for World Stream value normalization
  *
- * These helpers extract the delegation logic so it can be shared between:
+ * These helpers normalize World Stream values for use in:
  * - Provider-based hooks (use-context-usage.ts, etc.)
  * - Provider-free factory (factory.ts)
  *
- * Pattern: Try World Stream first, fall back to Zustand, return default if neither exists.
+ * Pattern: World Stream is the single source of truth.
  */
 
-import type { ContextUsage, CompactionState, SessionStatus, DirectoryState } from "../store/types"
+import type { ContextUsage, CompactionState, SessionStatus } from "../store/types"
 
 /**
  * Default context usage state when no data exists yet
@@ -37,43 +37,19 @@ const DEFAULT_COMPACTION_STATE: CompactionState = {
 }
 
 /**
- * Get context usage with World Stream → Zustand delegation
+ * Get context usage from World Stream
  *
- * @param worldValue - World Stream value (from useWorldContextUsage or undefined)
- * @param store - Zustand store state (directories object)
- * @param sessionId - Session ID
- * @param directory - Directory path
+ * @param worldValue - World Stream value (from useWorldContextUsage)
  * @returns Context usage state
  */
-export function getContextUsage(
-	worldValue: ContextUsage | undefined,
-	store: { directories: Record<string, DirectoryState> },
-	sessionId: string,
-	directory: string,
-): ContextUsage {
-	// Try World Stream first
-	if (worldValue !== undefined) {
-		return worldValue
-	}
-
-	// Fallback to Zustand
-	const zustandValue = store.directories[directory]?.contextUsage[sessionId]
-
-	if (zustandValue !== undefined) {
-		console.debug("[getContextUsage] Falling back to Zustand for", sessionId)
-		return zustandValue
-	}
-
-	return DEFAULT_CONTEXT_USAGE
+export function getContextUsage(worldValue: ContextUsage | undefined): ContextUsage {
+	return worldValue ?? DEFAULT_CONTEXT_USAGE
 }
 
 /**
- * Get compaction state with World Stream → Zustand delegation
+ * Get compaction state from World Stream
  *
- * @param worldValue - World Stream value (from useWorldCompactionState or undefined)
- * @param store - Zustand store state (directories object)
- * @param sessionId - Session ID
- * @param directory - Directory path
+ * @param worldValue - World Stream value (from useWorldCompactionState)
  * @returns Compaction state
  */
 export function getCompactionState(
@@ -86,9 +62,6 @@ export function getCompactionState(
 				progress?: number
 		  }
 		| undefined,
-	store: { directories: Record<string, DirectoryState> },
-	sessionId: string,
-	directory: string,
 ): CompactionState {
 	// Map Core type to Store type if World Stream has data
 	if (worldValue !== undefined) {
@@ -106,44 +79,15 @@ export function getCompactionState(
 		}
 	}
 
-	// Fallback to Zustand
-	const zustandValue = store.directories[directory]?.compaction[sessionId]
-
-	if (zustandValue !== undefined) {
-		console.debug("[getCompactionState] Falling back to Zustand for", sessionId)
-		return zustandValue
-	}
-
 	return DEFAULT_COMPACTION_STATE
 }
 
 /**
- * Get session status with World Stream → Zustand delegation
+ * Get session status from World Stream
  *
- * @param worldValue - World Stream value (from useWorldSessionStatus or undefined)
- * @param store - Zustand store state (directories object)
- * @param sessionId - Session ID
- * @param directory - Directory path
+ * @param worldValue - World Stream value (from useWorldSessionStatus)
  * @returns Session status
  */
-export function getSessionStatus(
-	worldValue: SessionStatus | undefined,
-	store: { directories: Record<string, DirectoryState> },
-	sessionId: string,
-	directory: string,
-): SessionStatus {
-	// Try World Stream first
-	if (worldValue !== undefined) {
-		return worldValue
-	}
-
-	// Fallback to Zustand
-	const zustandValue = store.directories[directory]?.sessionStatus[sessionId]
-
-	if (zustandValue !== undefined) {
-		console.debug("[getSessionStatus] Falling back to Zustand for", sessionId)
-		return zustandValue
-	}
-
-	return "completed"
+export function getSessionStatus(worldValue: SessionStatus | undefined): SessionStatus {
+	return worldValue ?? "completed"
 }
