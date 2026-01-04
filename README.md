@@ -1,13 +1,4 @@
-# opencode-vibe 🏄‍♂️
-
-```
-                                      _      │       _ _
-  ___  _ __   ___ _ __   ___ ___   __| | ___ │__   _(_) |__   ___
- / _ \| '_ \ / _ \ '_ \ / __/ _ \ / _` |/ _ \│\ \ / / | '_ \ / _ \
-| (_) | |_) |  __/ | | | (_| (_) | (_| |  __/│ \ V /| | |_) |  __/
- \___/| .__/ \___|_| |_|\___\___/ \__,_|\___│  \_/ |_|_.__/ \___|
-      |_|                                   │
-```
+![header](demo/header.png)
 
 Next.js 16 rebuild of the OpenCode web application. Real-time chat UI with streaming message display, SSE sync, and React Server Components.
 
