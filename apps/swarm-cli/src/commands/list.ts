@@ -192,8 +192,41 @@ export async function run(context: CommandContext): Promise<void> {
 			sources.push(createSwarmDbSource(defaultSwarmDbPath))
 		}
 
-		// Create merged world stream
-		stream = createMergedWorldStream({ sources })
+		// Create merged world stream with optional event logging
+		stream = createMergedWorldStream({
+			sources,
+			onEvent: options.debug
+				? (event) => {
+						// Log SSE events in debug mode
+						const eventType = event.type
+						// Only log interesting events (skip heartbeats)
+						if (
+							eventType.startsWith("session.") ||
+							eventType.startsWith("message.") ||
+							eventType.startsWith("part.")
+						) {
+							const props = event.properties as Record<string, unknown>
+							const sessionId = (props.sessionID as string) ?? (props.id as string) ?? ""
+							const parentId = props.parentID as string | undefined
+							const title = props.title as string | undefined
+							const status = props.status as string | undefined
+
+							// Format: [event] type sessionId (parentId) "title" status
+							let logLine = `[event] ${eventType} ${sessionId.slice(-12)}`
+							if (parentId) {
+								logLine += ` parent:${parentId.slice(-12)}`
+							}
+							if (title) {
+								logLine += ` "${title.slice(0, 30)}${title.length > 30 ? "..." : ""}"`
+							}
+							if (status) {
+								logLine += ` status:${status}`
+							}
+							console.error(logLine)
+						}
+					}
+				: undefined,
+		})
 
 		// Throttle updates (same pattern as watch.ts)
 		let lastUpdate = 0

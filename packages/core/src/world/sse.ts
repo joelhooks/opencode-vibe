@@ -676,9 +676,15 @@ export class WorldSSE {
 					updated.set(message.id, message)
 					this.registry.set(messagesAtom, updated)
 
-					// Map session to instance via messageID → sessionID lookup
+					// CRITICAL: Receiving message events = session is active
+					// Mark as "running" since we're getting live data
 					const sessionId = message.sessionID
 					if (sessionId) {
+						const statuses = this.registry.get(statusAtom)
+						const updatedStatuses = new Map(statuses)
+						updatedStatuses.set(sessionId, "running")
+						this.registry.set(statusAtom, updatedStatuses)
+
 						const instances = this.registry.get(instancesAtom)
 						const instance = instances.get(sourcePort)
 						if (instance) {
@@ -693,21 +699,36 @@ export class WorldSSE {
 			}
 
 			case "part.created":
-			case "part.updated": {
-				const part = properties as unknown as Part
-				if (part?.id) {
+			case "part.updated":
+			case "message.part.updated": {
+				// Handle both part.* and message.part.updated event types
+				// message.part.updated wraps part data in a "part" property
+				const partData =
+					type === "message.part.updated"
+						? (properties as { part?: Part }).part
+						: (properties as unknown as Part)
+
+				if (partData?.id) {
 					// Upsert part in partsAtom (Map)
 					const parts = this.registry.get(partsAtom)
 					const updated = new Map(parts)
-					updated.set(part.id, part)
+					updated.set(partData.id, partData)
 					this.registry.set(partsAtom, updated)
 
 					// Map session to instance via part → messageID → sessionID lookup
 					// Get message to find sessionID
 					const messages = this.registry.get(messagesAtom)
-					const message = messages.get(part.messageID)
+					const message = messages.get(partData.messageID)
 					const sessionId = message?.sessionID
+
+					// CRITICAL: Receiving part events = session is DEFINITELY running
+					// This is a STRONG SIGNAL - we're getting live streaming content
 					if (sessionId) {
+						const statuses = this.registry.get(statusAtom)
+						const updatedStatuses = new Map(statuses)
+						updatedStatuses.set(sessionId, "running")
+						this.registry.set(statusAtom, updatedStatuses)
+
 						const instances = this.registry.get(instancesAtom)
 						const instance = instances.get(sourcePort)
 						if (instance) {
