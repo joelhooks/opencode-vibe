@@ -217,11 +217,32 @@ export async function run(context: CommandContext): Promise<void> {
 
 			lastUpdate = now
 
-			// Render current state
-			renderWorld(world, options)
+			// In --once mode, wait for connection to be ready before rendering
+			// "discovering" = still scanning for servers
+			// "connecting" = found servers, still bootstrapping sessions
+			// "connected" = ready to show data
+			// "disconnected" = no servers found
+			const isReady =
+				world.connectionStatus === "connected" || world.connectionStatus === "disconnected"
 
-			// Exit after first render in --once mode (but wait for discovery to complete)
-			if (options.once && world.connectionStatus !== "discovering") {
+			if (options.once) {
+				if (!isReady) {
+					// Still loading - show minimal progress indicator only
+					if (world.connectionStatus === "discovering") {
+						const serverCount = world.instances.length
+						if (serverCount === 0) {
+							console.log("🔍 Discovering servers...")
+						} else {
+							console.log(
+								`🔍 Found ${serverCount} server${serverCount === 1 ? "" : "s"}, loading sessions...`,
+							)
+						}
+					}
+					return // Don't render full output yet
+				}
+
+				// Ready - render once and exit
+				renderWorld(world, options)
 				running = false
 				unsubscribe?.()
 				if (stream) {
@@ -229,6 +250,9 @@ export async function run(context: CommandContext): Promise<void> {
 				}
 				process.exit(0)
 			}
+
+			// Live mode - render current state
+			renderWorld(world, options)
 		})
 
 		// Periodic timer to refresh relative times (watch mode only)
