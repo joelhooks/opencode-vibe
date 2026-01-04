@@ -220,8 +220,8 @@ export async function run(context: CommandContext): Promise<void> {
 			// Render current state
 			renderWorld(world, options)
 
-			// Exit after first render in --once mode
-			if (options.once) {
+			// Exit after first render in --once mode (but wait for discovery to complete)
+			if (options.once && world.connectionStatus !== "discovering") {
 				running = false
 				unsubscribe?.()
 				if (stream) {
