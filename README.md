@@ -11,28 +11,30 @@
 
 Next.js 16 rebuild of the OpenCode web application. Real-time chat UI with streaming message display, SSE sync, and React Server Components.
 
-> **Warning:** This project uses Next.js 16 canary - bleeding edge, expect rough edges. Catppuccin-themed because we're not savages.
+> **Warning:** This project uses Next.js 16 canary - bleeding edge. Catppuccin-themed because we're not savages.
 
 ## Quick Start
 
-**Prerequisites:** [Bun](https://bun.sh) v1.3+ and [OpenCode CLI](https://github.com/sst/opencode) running locally.
+**Prerequisites:** [Bun](https://bun.sh) v1.3+ and [OpenCode CLI](https://github.com/sst/opencode).
 
-```bash
-# 1. Install dependencies
-bun install
+1. **Start OpenCode in your project:**
+   Navigate to the project you want to work on and keep this running:
+   ```bash
+   cd /path/to/your/project
+   opencode
+   ```
 
-# 2. Start OpenCode (any mode - TUI or serve)
-cd /path/to/your/project
-opencode
+2. **Start the Web UI:**
+   Clone this repo, install, and run:
+   ```bash
+   git clone https://github.com/opencode-ai/opencode-vibe.git
+   cd opencode-vibe
+   bun install
+   bun dev
+   ```
 
-# 3. Start the web UI
-bun dev
-
-# 4. Open browser
-# Navigate to: http://localhost:8423
-```
-
-The web UI auto-discovers all running OpenCode processes. No configuration needed.
+3. **Open Browser:**
+   Go to **http://localhost:8423**
 
 ---
 
