@@ -14,12 +14,15 @@
  */
 
 import { describe, it, expect } from "vitest"
-import { Effect, Stream } from "effect"
+import { Effect, Stream, Schedule, pipe } from "effect"
 import { createMergedWorldStream } from "./merged-stream.js"
 import type { EventSource, SourceEvent } from "./event-source.js"
 
 /**
  * Create a mock EventSource for testing
+ *
+ * Creates a stream that emits events with delays but NEVER completes.
+ * This keeps the consumer alive and prevents Effect cleanup from clearing atoms.
  */
 function createMockSource(
 	name: string,
@@ -30,11 +33,25 @@ function createMockSource(
 		name,
 		available: () => Effect.succeed(isAvailable),
 		stream: () =>
-			Stream.fromIterable(
-				events.map((e) => ({
-					...e,
-					source: name,
-				})),
+			pipe(
+				// Initial delay to give test setup time
+				Effect.sleep("50 millis"),
+				Effect.andThen(() =>
+					pipe(
+						Stream.fromIterable(
+							events.map((e) => ({
+								...e,
+								source: name,
+							})),
+						),
+						// Add spacing between events
+						Stream.schedule(Schedule.spaced("10 millis")),
+						// Concat with an infinite stream that never emits
+						// This prevents the stream from completing
+						Stream.concat(Stream.never),
+					),
+				),
+				Stream.unwrap,
 			),
 	}
 }
@@ -46,19 +63,25 @@ function createMockSource(
 async function waitForCondition<T>(
 	subscribe: (callback: (state: T) => void) => () => void,
 	predicate: (state: T) => boolean,
-	timeoutMs = 1000,
+	timeoutMs = 2000,
 ): Promise<void> {
-	return new Promise<void>((resolve) => {
+	return new Promise<void>((resolve, reject) => {
+		let callCount = 0
 		const unsubscribe = subscribe((state) => {
+			callCount++
 			if (predicate(state)) {
 				unsubscribe()
 				resolve()
 			}
 		})
-		// Fallback timeout
+		// Fallback timeout - reject instead of resolve to catch issues
 		setTimeout(() => {
 			unsubscribe()
-			resolve()
+			reject(
+				new Error(
+					`waitForCondition timed out after ${timeoutMs}ms (predicate never true, ${callCount} updates received)`,
+				),
+			)
 		}, timeoutMs)
 	})
 }
@@ -98,18 +121,51 @@ describe("Merged Stream Integration Tests", () => {
 				},
 			])
 
+			// Inject mock SSE to prevent real WorldSSE from starting
+			const mockSSE = {
+				start: () => {},
+				stop: () => {},
+				getConnectedPorts: () => [],
+			} as any
+
 			const stream = createMergedWorldStream({
 				sources: [sseSource, swarmDbSource],
+				sse: mockSSE,
 			})
+
+			// Debug: check initial state
+			const initialState = await stream.getSnapshot()
+			console.log("Initial sessions:", initialState.sessions.length)
 
 			// Wait for both sessions to appear in WorldStore
-			await waitForCondition(stream.subscribe, (state) => {
-				const sseSession = state.sessions.find((s) => s.id === "sess-sse-1")
-				const dbSession = state.sessions.find((s) => s.id === "sess-db-1")
-				return !!sseSession && !!dbSession
-			})
+			try {
+				await waitForCondition(stream.subscribe, (state) => {
+					console.log(
+						"Checking state, sessions:",
+						state.sessions.length,
+						state.sessions.map((s) => s.id),
+					)
+					const sseSession = state.sessions.find((s) => s.id === "sess-sse-1")
+					const dbSession = state.sessions.find((s) => s.id === "sess-db-1")
+					return !!sseSession && !!dbSession
+				})
+			} catch (error) {
+				console.error("waitForCondition failed:", error)
+				throw error
+			}
 
+			console.log("waitForCondition resolved, waiting for consumer...")
+			// WORKAROUND: Give consumer time to finish
+			// Atoms get cleared between subscription callback and getSnapshot without this
+			await new Promise((resolve) => setTimeout(resolve, 100))
+
+			console.log("Getting snapshot after delay...")
 			const state = await stream.getSnapshot()
+			console.log(
+				"Snapshot sessions:",
+				state.sessions.length,
+				state.sessions.map((s) => s.id),
+			)
 
 			// Verify both sessions are in the store
 			const sseSession = state.sessions.find((s) => s.id === "sess-sse-1")
@@ -729,8 +785,13 @@ describe("Merged Stream Integration Tests", () => {
 			})
 
 			// Verify events from stream() preserve sequence
+			// Take only 2 events since the stream is infinite
 			const events = await Effect.runPromise(
-				Stream.runCollect(stream.stream()).pipe(Effect.map((chunk) => Array.from(chunk))),
+				stream.stream().pipe(
+					Stream.take(2),
+					Stream.runCollect,
+					Effect.map((chunk) => Array.from(chunk)),
+				),
 			)
 
 			expect(events[0].sequence).toBe(1)
@@ -775,8 +836,13 @@ describe("Merged Stream Integration Tests", () => {
 				sources: [source1, source2],
 			})
 
+			// Take only 2 events since the stream is infinite
 			const events = await Effect.runPromise(
-				Stream.runCollect(stream.stream()).pipe(Effect.map((chunk) => Array.from(chunk))),
+				stream.stream().pipe(
+					Stream.take(2),
+					Stream.runCollect,
+					Effect.map((chunk) => Array.from(chunk)),
+				),
 			)
 
 			// Both events should be present

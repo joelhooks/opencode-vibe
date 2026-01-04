@@ -371,7 +371,14 @@ export class WorldSSE {
 	start(): void {
 		if (this.running) return
 		this.running = true
-		this.registry.set(connectionStatusAtom, "connecting")
+
+		// Set discovering status for auto-discovery mode
+		// Direct serverUrl connections skip discovery and use "connecting"
+		if (this.config.serverUrl) {
+			this.registry.set(connectionStatusAtom, "connecting")
+		} else {
+			this.registry.set(connectionStatusAtom, "discovering")
+		}
 
 		// Create scope for fiber lifecycle
 		Effect.runPromise(Scope.make()).then((scope) => {
@@ -470,11 +477,19 @@ export class WorldSSE {
 				}
 			}
 
-			// Update connection status
+			// Update connection status based on discovery results
+			// Transition from "discovering" → "connected"/"disconnected"/"connecting"
+			const currentStatus = this.registry.get(connectionStatusAtom)
+
 			if (this.connectedPorts.size > 0) {
+				// Successfully connected to at least one server
 				this.registry.set(connectionStatusAtom, "connected")
 			} else if (servers.length === 0) {
+				// Discovery found no servers
 				this.registry.set(connectionStatusAtom, "disconnected")
+			} else if (currentStatus === "discovering") {
+				// Discovery found servers but not connected yet
+				this.registry.set(connectionStatusAtom, "connecting")
 			}
 		})
 

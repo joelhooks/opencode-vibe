@@ -9,6 +9,7 @@
 import type { OutputConfig } from "../output.js"
 import * as statusCmd from "./status.js"
 import * as watchCmd from "./watch.js"
+import * as listCmd from "./list.js"
 
 export interface CommandContext {
 	args: string[]
@@ -23,7 +24,7 @@ export interface Command {
 /**
  * Command registry
  *
- * Simplified to two commands: status (observe) and watch (monitor).
+ * Commands: status (observe), watch (monitor), list (projects→sessions).
  * Progressive discovery: tools teach by doing, not front-loaded complexity.
  */
 export const commands: Record<string, Command> = {
@@ -34,6 +35,10 @@ export const commands: Record<string, Command> = {
 	watch: {
 		description: watchCmd.description,
 		run: watchCmd.run,
+	},
+	list: {
+		description: listCmd.description,
+		run: listCmd.run,
 	},
 }
 

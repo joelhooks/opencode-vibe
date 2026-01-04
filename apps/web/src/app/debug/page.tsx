@@ -38,6 +38,7 @@ function ConnectionIndicator() {
 	const status = useWorldConnection()
 
 	const statusColors: Record<ConnectionStatus, string> = {
+		discovering: "bg-blue-500",
 		connecting: "bg-yellow-500",
 		connected: "bg-green-500",
 		disconnected: "bg-gray-500",

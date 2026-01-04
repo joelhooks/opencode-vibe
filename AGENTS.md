@@ -495,6 +495,103 @@ interface Session { id: string; ... }  // DON'T DO THIS
 - **Binary search everywhere** - Updates use binary search on sorted arrays. Assumes IDs are sortable (they are - ULIDs).
 - **Session limit** - UI loads 5 sessions by default + any updated in last 4 hours. Older sessions lazy-loaded.
 
+### effect-atom Gotchas
+
+- **Atoms reset after microtask without subscription** - By default, atoms reset to initial value after `await`/`Promise.resolve()` if no active subscription. Use `Atom.keepAlive` or maintain subscription during assertions.
+- **keepAlive is opt-in** - `Atom.make(value)` does NOT persist. Use `Atom.make(value).pipe(Atom.keepAlive)` for persistent atoms.
+- **mount() keeps atoms alive** - `registry.mount(atom)` maintains subscription. Call returned cleanup function when done.
+
+---
+
+## Check the Source (RTFM)
+
+**When debugging unexpected library behavior, CHECK THE LIBRARY'S TEST SUITE FIRST.**
+
+Library test suites are the canonical documentation for edge cases, gotchas, and expected behavior. They're often more accurate than docs.
+
+### When to Check the Source
+
+1. **Unexpected behavior** - Library doesn't work as you expect
+2. **Missing documentation** - Docs don't cover your use case
+3. **Version-specific issues** - Behavior changed between versions
+4. **Test failures** - Your tests fail but code looks correct
+5. **Integration issues** - Two libraries don't play well together
+
+### How to Check
+
+```bash
+# Clone and search the library's test suite
+repo-autopsy_clone(repo="owner/library")
+repo-autopsy_search(repo="owner/library", pattern="yourFeature")
+repo-autopsy_file(repo="owner/library", path="test/feature.test.ts")
+```
+
+### Examples
+
+#### effect-atom: keepAlive behavior
+
+**Problem:** Tests pass in subscription callback but fail after `await`.
+
+**Source revealed:** `tim-smart/effect-atom/packages/atom/test/Atom.test.ts` lines 35-42:
+```typescript
+it("keepAlive false", async () => {
+  const counter = Atom.make(0)
+  const r = Registry.make()
+  r.set(counter, 1)
+  expect(r.get(counter)).toEqual(1)
+  await new Promise((resolve) => resolve(null))  // microtask!
+  expect(r.get(counter)).toEqual(0)  // RESET TO DEFAULT!
+})
+```
+
+**Learning:** Atoms reset after microtask without `Atom.keepAlive`.
+
+#### @opencode-ai/sdk: Event shapes
+
+**Problem:** Can't access `part` from `EventMessagePartUpdated`.
+
+**Source revealed:** `packages/sdk/openapi.json` shows nested structure:
+```json
+{ "type": "message.part.updated", "properties": { "part": { ... } } }
+```
+
+**Learning:** Part is nested in `properties.part`, not flat like other events.
+
+#### Effect-TS: Service testing patterns
+
+**Problem:** How to test services with dependencies?
+
+**Source revealed:** `kitlangton/effect-solutions/tests/08-testing.test.ts`:
+```typescript
+// Use Layer.provideMerge to expose both orchestrator AND leaf services
+const TestLayer = Layer.provideMerge(
+  EventsLive,
+  Layer.mergeAll(UsersTest, EmailsTest)
+)
+```
+
+**Learning:** `Layer.provideMerge` > `Layer.provide` for testing - exposes all services.
+
+### Key Source Repos
+
+| Library | Test Location | Key Patterns |
+|---------|--------------|--------------|
+| effect-atom | `tim-smart/effect-atom/packages/atom/test/` | keepAlive, mount, subscribe lifecycle |
+| Effect-TS | `Effect-TS/effect/packages/effect/test/` | Layer composition, error handling |
+| @opencode-ai/sdk | `sst/opencode/packages/sdk/` | Event shapes, API contracts |
+| ai-elements | `vercel-labs/ai-elements/` | Chat component props, streaming |
+
+### Store Your Findings
+
+After discovering a gotcha from source, store it:
+
+```typescript
+hivemind_store(
+  information="<library> <feature>: <what you learned, WHY it matters>",
+  tags="<library>, gotcha, <feature>"
+)
+```
+
 ---
 
 ## References

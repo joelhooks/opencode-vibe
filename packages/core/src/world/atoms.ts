@@ -12,8 +12,15 @@ import * as Registry from "@effect-atom/atom/Registry"
 import { Effect, Metric, Context, Layer } from "effect"
 import type { Message, Part, Session } from "../types/domain.js"
 import type { SessionStatus } from "../types/events.js"
-import type { Project } from "../types/sdk.js"
-import type { EnrichedMessage, EnrichedSession, WorldState, Instance } from "./types.js"
+import type { Project, SessionStatus as SessionStatusObject } from "../types/sdk.js"
+import type {
+	EnrichedMessage,
+	EnrichedSession,
+	WorldState,
+	Instance,
+	ContextUsage,
+	CompactionState,
+} from "./types.js"
 import { WorldMetrics } from "./metrics.js"
 
 /**
@@ -24,7 +31,7 @@ interface WorldStateData {
 	messages: Message[]
 	parts: Part[]
 	status: Record<string, SessionStatus>
-	connectionStatus: "connecting" | "connected" | "disconnected" | "error"
+	connectionStatus: "discovering" | "connecting" | "connected" | "disconnected" | "error"
 	instances: Instance[]
 	projects: Project[]
 	sessionToInstancePort: Record<string, number>
@@ -303,7 +310,9 @@ export class WorldStore {
 	/**
 	 * Update connection status
 	 */
-	setConnectionStatus(status: "connecting" | "connected" | "disconnected" | "error"): void {
+	setConnectionStatus(
+		status: "discovering" | "connecting" | "connected" | "disconnected" | "error",
+	): void {
 		this.data.connectionStatus = status
 		this.notify()
 	}
@@ -498,6 +507,7 @@ export class WorldStore {
 			connectionStatus: data.connectionStatus,
 			lastUpdated: Date.now(),
 			byDirectory,
+			statuses: new Map(Object.entries(data.status)), // Expose status map for consumers
 			stats,
 			instances: data.instances,
 			instanceByPort,
@@ -600,7 +610,7 @@ export interface WorldStoreServiceInterface {
 	 * Update connection status
 	 */
 	setConnectionStatus: (
-		status: "connecting" | "connected" | "disconnected" | "error",
+		status: "discovering" | "connecting" | "connected" | "disconnected" | "error",
 	) => Effect.Effect<void, never, never>
 }
 
@@ -654,8 +664,9 @@ export const WorldStoreServiceLive: Layer.Layer<WorldStoreService, never, never>
 				upsertPart: (part: Part) => Effect.sync(() => store.upsertPart(part)),
 				getMessageSessionId: (messageId: string) =>
 					Effect.sync(() => store.getMessageSessionId(messageId)),
-				setConnectionStatus: (status: "connecting" | "connected" | "disconnected" | "error") =>
-					Effect.sync(() => store.setConnectionStatus(status)),
+				setConnectionStatus: (
+					status: "discovering" | "connecting" | "connected" | "disconnected" | "error",
+				) => Effect.sync(() => store.setConnectionStatus(status)),
 			}
 		}),
 		// Release: Cleanup (WorldStore has no explicit cleanup currently)
@@ -673,49 +684,49 @@ export const WorldStoreServiceLive: Layer.Layer<WorldStoreService, never, never>
 /**
  * Sessions atom - Map for O(1) lookup by session ID
  */
-export const sessionsAtom = Atom.make(new Map<string, Session>())
+export const sessionsAtom = Atom.make(new Map<string, Session>()).pipe(Atom.keepAlive)
 
 /**
  * Messages atom - Map of message ID to Message
  */
-export const messagesAtom = Atom.make(new Map<string, Message>())
+export const messagesAtom = Atom.make(new Map<string, Message>()).pipe(Atom.keepAlive)
 
 /**
  * Parts atom - Map of part ID to Part
  */
-export const partsAtom = Atom.make(new Map<string, Part>())
+export const partsAtom = Atom.make(new Map<string, Part>()).pipe(Atom.keepAlive)
 
 /**
  * Status atom - Map of session ID to SessionStatus
  */
-export const statusAtom = Atom.make(new Map<string, SessionStatus>())
+export const statusAtom = Atom.make(new Map<string, SessionStatus>()).pipe(Atom.keepAlive)
 
 /**
  * Connection status atom
  */
 export const connectionStatusAtom = Atom.make<
-	"connecting" | "connected" | "disconnected" | "error"
->("disconnected")
+	"discovering" | "connecting" | "connected" | "disconnected" | "error"
+>("disconnected").pipe(Atom.keepAlive)
 
 /**
  * Instances atom - Map of port to Instance
  */
-export const instancesAtom = Atom.make(new Map<number, Instance>())
+export const instancesAtom = Atom.make(new Map<number, Instance>()).pipe(Atom.keepAlive)
 
 /**
  * Projects atom - Map of worktree path to Project
  */
-export const projectsAtom = Atom.make(new Map<string, Project>())
+export const projectsAtom = Atom.make(new Map<string, Project>()).pipe(Atom.keepAlive)
 
 /**
  * Session to instance port mapping for routing
  */
-export const sessionToInstancePortAtom = Atom.make(new Map<string, number>())
+export const sessionToInstancePortAtom = Atom.make(new Map<string, number>()).pipe(Atom.keepAlive)
 
 /**
  * Derived atom - session count
  */
-export const sessionCountAtom = Atom.make((get) => get(sessionsAtom).size)
+export const sessionCountAtom = Atom.make((get) => get(sessionsAtom).size).pipe(Atom.keepAlive)
 
 /**
  * Derived atom - computes enriched WorldState from primitive atoms
@@ -739,7 +750,7 @@ export const worldStateAtom = Atom.make((get) => {
 	// NOTE: This duplicates the derivation logic temporarily.
 	// Once WorldStore is deleted, we can extract this as a pure function.
 	return deriveWorldStateFromData(data)
-})
+}).pipe(Atom.keepAlive)
 
 /**
  * Pure function: derive WorldState from WorldStateData
@@ -814,16 +825,49 @@ function deriveWorldStateFromData(data: WorldStateData): WorldState {
 		// Context usage percent - compute from last assistant message tokens
 		// Total tokens = input + output + reasoning + cache.read + cache.write
 		let contextUsagePercent = 0
+		let contextUsage: ContextUsage | undefined = undefined
 		for (let i = sessionMessages.length - 1; i >= 0; i--) {
 			const msg = sessionMessages[i]
 			if (msg.role === "assistant" && msg.tokens && msg.model?.limits?.context) {
-				const totalTokens =
-					msg.tokens.input +
-					msg.tokens.output +
-					(msg.tokens.reasoning ?? 0) +
-					(msg.tokens.cache?.read ?? 0) +
-					(msg.tokens.cache?.write ?? 0)
-				contextUsagePercent = (totalTokens / msg.model.limits.context) * 100
+				const inputTokens = msg.tokens.input
+				const outputTokens = msg.tokens.output
+				const cachedTokens = (msg.tokens.cache?.read ?? 0) + (msg.tokens.cache?.write ?? 0)
+				const totalTokens = inputTokens + outputTokens + (msg.tokens.reasoning ?? 0) + cachedTokens
+				const percentage = (totalTokens / msg.model.limits.context) * 100
+
+				// Backward compat
+				contextUsagePercent = percentage
+
+				// New detailed context usage
+				contextUsage = {
+					used: totalTokens,
+					limit: msg.model.limits.context,
+					percentage,
+					isNearLimit: percentage > 80,
+					tokens: {
+						input: inputTokens,
+						output: outputTokens,
+						cached: cachedTokens,
+					},
+					lastUpdated: msg.time?.completed ?? msg.time?.created ?? Date.now(),
+				}
+				break
+			}
+		}
+
+		// Detect compaction state from messages
+		let compactionState: CompactionState | undefined = undefined
+		for (const msg of sessionMessages) {
+			if (msg.agent === "compaction") {
+				// Active compaction detected
+				const isCompacting = !msg.time?.completed // Still running if no completed time
+				compactionState = {
+					isCompacting,
+					isAutomatic: true, // Default assumption - can be refined later
+					startedAt: msg.time?.created,
+					messageId: msg.id,
+				}
+				// Use first compaction message found (they're in chronological order)
 				break
 			}
 		}
@@ -835,6 +879,8 @@ function deriveWorldStateFromData(data: WorldStateData): WorldState {
 			messages: sessionMessages,
 			unreadCount: 0, // TODO: implement unread tracking
 			contextUsagePercent,
+			contextUsage,
+			compactionState,
 			lastActivityAt,
 		}
 	})
@@ -922,6 +968,7 @@ function deriveWorldStateFromData(data: WorldStateData): WorldState {
 		connectionStatus: data.connectionStatus,
 		lastUpdated: Date.now(),
 		byDirectory,
+		statuses: new Map(Object.entries(data.status)), // Expose status map for consumers
 		stats,
 		instances: data.instances,
 		instanceByPort,

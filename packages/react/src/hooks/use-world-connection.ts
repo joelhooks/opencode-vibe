@@ -25,7 +25,7 @@ import { useWorld } from "./use-world.js"
 /**
  * Connection status type
  */
-export type ConnectionStatus = "connecting" | "connected" | "disconnected" | "error"
+export type ConnectionStatus = "discovering" | "connecting" | "connected" | "disconnected" | "error"
 
 /**
  * useWorldConnection - Subscribe to connection status

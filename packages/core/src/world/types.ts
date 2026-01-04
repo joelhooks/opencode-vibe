@@ -138,7 +138,7 @@ export interface WorldState {
 	sessions: EnrichedSession[]
 	activeSessionCount: number
 	activeSession: EnrichedSession | null
-	connectionStatus: "connecting" | "connected" | "disconnected" | "error"
+	connectionStatus: "discovering" | "connecting" | "connected" | "disconnected" | "error"
 	lastUpdated: number
 
 	/**

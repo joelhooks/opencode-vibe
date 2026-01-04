@@ -18,6 +18,7 @@ function createMockWorldState(overrides: Partial<WorldState> = {}): WorldState {
 		connectionStatus: "connected",
 		lastUpdated: Date.now(),
 		byDirectory: new Map(),
+		statuses: new Map(),
 		stats: { total: 0, active: 0, streaming: 0 },
 		instances: [],
 		instanceByPort: new Map(),

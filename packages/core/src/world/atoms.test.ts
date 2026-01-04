@@ -1601,11 +1601,12 @@ describe("effect-atom atoms", () => {
 			expect(result).toBe("connected")
 		})
 
-		it("supports all connection states", async () => {
+		it("supports all connection states including discovering", async () => {
 			const { connectionStatusAtom, Registry } = await import("./atoms.js")
 			const registry = Registry.make()
 
-			const states: Array<"connecting" | "connected" | "disconnected" | "error"> = [
+			const states: Array<"discovering" | "connecting" | "connected" | "disconnected" | "error"> = [
+				"discovering",
 				"connecting",
 				"connected",
 				"disconnected",

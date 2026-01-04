@@ -62,6 +62,7 @@ describe("WorldStream Types", () => {
 			connectionStatus: "connected",
 			lastUpdated: Date.now(),
 			byDirectory: new Map(),
+			statuses: new Map(),
 			stats: { total: 0, active: 1, streaming: 0 },
 			// New instance/project fields
 			instances: [],
