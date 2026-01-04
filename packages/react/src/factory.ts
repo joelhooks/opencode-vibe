@@ -45,6 +45,7 @@ import {
 	useMultiDirectoryStatus as useMultiDirectoryStatusBase,
 	type UseMultiDirectoryStatusReturn,
 } from "./hooks/use-multi-directory-status"
+import { getContextUsage, getCompactionState } from "./lib/delegation-helpers"
 
 /**
  * Global config type augmentation
@@ -96,30 +97,6 @@ export function getOpencodeConfig(fallback?: OpencodeConfig): OpencodeConfig {
 		"OpenCode: No configuration found. " +
 			"Did you forget to add <OpencodeSSRPlugin> to your layout?",
 	)
-}
-
-/**
- * Default state objects (stable references)
- * CRITICAL: These MUST be outside functions to prevent new objects on every render
- */
-const DEFAULT_COMPACTION_STATE: CompactionState = {
-	isCompacting: false,
-	isAutomatic: false,
-	progress: "complete",
-	startedAt: 0,
-}
-
-const DEFAULT_CONTEXT_USAGE: ContextUsage = {
-	used: 0,
-	limit: 200000,
-	percentage: 0,
-	isNearLimit: false,
-	tokens: {
-		input: 0,
-		output: 0,
-		cached: 0,
-	},
-	lastUpdated: 0,
 }
 
 /**
@@ -755,6 +732,9 @@ export function generateOpencodeHelpers<TRouter = any>(config?: OpencodeConfig) 
 	/**
 	 * Hook for compaction state
 	 *
+	 * Delegates to World Stream first (via delegation helper), falls back to Zustand.
+	 * Factory doesn't have World Stream yet, so worldValue is undefined.
+	 *
 	 * @param sessionId - Session ID
 	 * @returns Compaction state
 	 *
@@ -768,8 +748,10 @@ export function generateOpencodeHelpers<TRouter = any>(config?: OpencodeConfig) 
 
 		return useOpencodeStore(
 			useCallback(
-				(state) =>
-					state.directories[cfg.directory]?.compaction[sessionId] ?? DEFAULT_COMPACTION_STATE,
+				(state) => {
+					// Factory doesn't have World Stream yet - pass undefined
+					return getCompactionState(undefined, state, sessionId, cfg.directory)
+				},
 				[sessionId, cfg.directory],
 			),
 		)
@@ -777,6 +759,9 @@ export function generateOpencodeHelpers<TRouter = any>(config?: OpencodeConfig) 
 
 	/**
 	 * Hook for context usage (token counts)
+	 *
+	 * Delegates to World Stream first (via delegation helper), falls back to Zustand.
+	 * Factory doesn't have World Stream yet, so worldValue is undefined.
 	 *
 	 * @param sessionId - Session ID
 	 * @returns Context usage state
@@ -791,8 +776,10 @@ export function generateOpencodeHelpers<TRouter = any>(config?: OpencodeConfig) 
 
 		return useOpencodeStore(
 			useCallback(
-				(state) =>
-					state.directories[cfg.directory]?.contextUsage[sessionId] ?? DEFAULT_CONTEXT_USAGE,
+				(state) => {
+					// Factory doesn't have World Stream yet - pass undefined
+					return getContextUsage(undefined, state, sessionId, cfg.directory)
+				},
 				[sessionId, cfg.directory],
 			),
 		)
