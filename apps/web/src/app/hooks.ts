@@ -29,7 +29,6 @@ export const {
 	useContextUsage,
 	useLiveTime,
 	useSubagent,
-	useServersEffect,
 } = generateOpencodeHelpers()
 
 // Re-export types for components

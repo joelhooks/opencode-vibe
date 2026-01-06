@@ -13,7 +13,7 @@
  * - useMultiDirectoryStatus already used World Stream
  */
 
-import { useMemo, memo, useState, useEffect } from "react"
+import { useMemo, memo, useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { motion, AnimatePresence } from "framer-motion"
 import { useLiveTime, useConnectionStatus } from "@/app/hooks"
@@ -295,6 +295,11 @@ function SSEStatus() {
  * 3. Merges live sessions from World Stream with initial server data
  */
 export function ProjectsList({ initialProjects }: ProjectsListProps) {
+	// Debug: Track renders
+	const renderCount = useRef(0)
+	renderCount.current++
+	console.log(`[ProjectsList] Render #${renderCount.current}`)
+
 	// Get directories for multi-directory hooks
 	const directories = useMemo(
 		() => initialProjects.map((p) => p.project.worktree),
@@ -320,6 +325,13 @@ export function ProjectsList({ initialProjects }: ProjectsListProps) {
 		directories,
 		initialSessionsForBootstrap,
 	)
+
+	// Debug: Log when session statuses change
+	useEffect(() => {
+		if (Object.keys(sessionStatuses).length > 0) {
+			console.log("[ProjectsList] sessionStatuses updated:", sessionStatuses)
+		}
+	}, [sessionStatuses])
 
 	if (initialProjects.length === 0) {
 		return (

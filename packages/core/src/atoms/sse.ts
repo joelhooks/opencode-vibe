@@ -125,7 +125,7 @@ export const SSEAtom = {
 	 *
 	 * @example
 	 * ```typescript
-	 * const stream = SSEAtom.connect({ url: "http://localhost:4056" })
+	 * const stream = SSEAtom.connect({ url: serverUrl })
 	 *
 	 * // Consume events with retry
 	 * await Effect.runPromise(
@@ -154,7 +154,7 @@ export const SSEAtom = {
 	 *
 	 * @example
 	 * ```typescript
-	 * const stream = SSEAtom.connectOnce({ url: "http://localhost:4056" })
+	 * const stream = SSEAtom.connectOnce({ url: serverUrl })
 	 * ```
 	 */
 	connectOnce: (config: SSEConfig): Stream.Stream<GlobalEvent, Error> => {
@@ -177,8 +177,13 @@ export function makeSSEAtom(config: SSEConfig) {
 }
 
 /**
- * Default SSE atom - connects to NEXT_PUBLIC_OPENCODE_URL or localhost:4056
+ * Default SSE atom - connects to NEXT_PUBLIC_OPENCODE_URL if set
+ *
+ * @deprecated Use SSEAtom.connect() with URL from discovery instead
+ * This export is only for backwards compatibility when env var is set
  */
-export const sseAtom = makeSSEAtom({
-	url: process.env.NEXT_PUBLIC_OPENCODE_URL ?? "http://localhost:4056",
-})
+export const sseAtom = process.env.NEXT_PUBLIC_OPENCODE_URL
+	? makeSSEAtom({
+			url: process.env.NEXT_PUBLIC_OPENCODE_URL,
+		})
+	: null

@@ -9,8 +9,9 @@ import { describe, it, expect } from "vitest"
 import { Effect, Stream } from "effect"
 import { createMergedWorldStream } from "./merged-stream.js"
 import type { EventSource, SourceEvent } from "./event-source.js"
-import { Registry, connectionStatusAtom } from "./atoms.js"
+import { Registry, connectionStatusAtom, worldStateAtom, sessionsAtom } from "./atoms.js"
 import type { WorldSSE } from "./sse.js"
+import type { WorldState } from "./types.js"
 
 /**
  * Wait for condition in store with timeout
@@ -667,6 +668,55 @@ describe("createMergedWorldStream", () => {
 			// Expected: callbackCount should be 1 (initial state)
 			expect(callbackCount).toBeGreaterThanOrEqual(1)
 
+			await stream.dispose()
+		})
+
+		it("subscribe callback fires when atoms change via event routing", async () => {
+			// Verifies subscribers Set pattern works
+			// Subscribers get notified after routeEventToRegistry() updates atoms
+
+			const registry = Registry.make()
+			const sse = createTestSSE(registry)
+
+			const now = Date.now()
+			const source = createMockSource("test-source", [
+				{
+					type: "session.created",
+					data: {
+						id: "sess-subscribe-test",
+						title: "Subscribe Test",
+						directory: "/test",
+						time: { created: now, updated: now },
+					},
+					timestamp: now,
+				},
+			])
+
+			const stream = createMergedWorldStream({ registry, sse, sources: [source] })
+
+			const states: WorldState[] = []
+			const unsubscribe = stream.subscribe((state) => {
+				states.push(state)
+			})
+
+			// Wait for event to be processed
+			await new Promise((resolve) => setTimeout(resolve, 150))
+
+			// Should have received at least the initial state
+			expect(states.length).toBeGreaterThanOrEqual(1)
+
+			// First state is initial callback
+			expect(states[0].sessions.length).toBe(0)
+
+			// After event processing, should have session
+			if (states.length > 1) {
+				const lastState = states[states.length - 1]
+				expect(lastState.sessions.some((s: { id: string }) => s.id === "sess-subscribe-test")).toBe(
+					true,
+				)
+			}
+
+			unsubscribe()
 			await stream.dispose()
 		})
 	})

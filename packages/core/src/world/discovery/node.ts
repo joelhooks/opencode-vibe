@@ -7,7 +7,7 @@
  * Uses lsof to discover running OpenCode servers by scanning for
  * bun/opencode processes listening on TCP ports.
  *
- * @module discovery/discovery.node
+ * @module world/discovery/node
  */
 
 import { Effect, Layer } from "effect"
@@ -150,7 +150,7 @@ function effectAllLimit<A>(effects: Effect.Effect<A>[], limit: number): Effect.E
  *
  * USAGE:
  * ```typescript
- * import { DiscoveryNodeLive } from "@opencode-vibe/core/discovery/node"
+ * import { DiscoveryNodeLive } from "@opencode-vibe/core/world/discovery/node"
  *
  * const program = Effect.gen(function* () {
  *   const discovery = yield* Discovery

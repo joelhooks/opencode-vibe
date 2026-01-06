@@ -5,10 +5,9 @@
  * (browser-based fetch proxy vs Node.js lsof scanning).
  *
  * Effect Layers provide implementations:
- * - DiscoveryBrowserLive: Uses /api/opencode/servers endpoint
  * - DiscoveryNodeLive: Direct lsof process scanning
  *
- * @module discovery/types
+ * @module world/discovery/types
  */
 
 import { Effect } from "effect"
@@ -89,7 +88,6 @@ export interface DiscoveryOptions {
  * Discovery Effect.Service interface
  *
  * THE contract for server discovery. Implementations provide layers:
- * - DiscoveryBrowserLive: Browser-safe fetch proxy
  * - DiscoveryNodeLive: Direct lsof process scanning
  *
  * Returns Effect that:

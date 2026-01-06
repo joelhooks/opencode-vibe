@@ -7,8 +7,8 @@ import { NextRequest, NextResponse } from "next/server"
  * on mobile/Tailscale. Proxies to http://127.0.0.1:${port}/${path}
  *
  * Architecture:
- * - Browser: fetch('/api/opencode/4056/session/list') [same-origin]
- * - Next.js: Proxy to http://127.0.0.1:4056/session/list [server-to-server]
+ * - Browser: fetch('/api/opencode/{port}/session/list') [same-origin]
+ * - Next.js: Proxy to http://127.0.0.1:{port}/session/list [server-to-server]
  * - Response: Return to browser [same-origin]
  *
  * Route Priority:
@@ -23,10 +23,10 @@ import { NextRequest, NextResponse } from "next/server"
  *
  * @example
  * // Client makes same-origin request
- * fetch('/api/opencode/4056/session/list')
+ * fetch('/api/opencode/{port}/session/list')
  *
  * // Next.js proxies to
- * http://127.0.0.1:4056/session/list
+ * http://127.0.0.1:{port}/session/list
  *
  * // Returns response to browser (same-origin)
  */
@@ -79,8 +79,8 @@ function validatePort(
  * @returns Full URL to proxy to
  *
  * @example
- * buildTargetUrl(4056, ['session', 'list'])
- * // => 'http://127.0.0.1:4056/session/list'
+ * buildTargetUrl({port}, ['session', 'list'])
+ * // => 'http://127.0.0.1:{port}/session/list'
  */
 function buildTargetUrl(port: number, path: string[] = []): string {
 	const pathString = path.length > 0 ? `/${path.join("/")}` : ""

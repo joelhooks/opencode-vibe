@@ -32,7 +32,7 @@ export function ProviderDetail({ id }: { id: string }) {
 		)
 	}
 
-	const provider = providers.find((p) => p.id === id)
+	const provider = providers.find((p: any) => p.id === id)
 
 	if (!provider) {
 		return (
@@ -96,7 +96,7 @@ export function ProviderDetail({ id }: { id: string }) {
 					<h2 className="text-2xl font-bold text-text mb-4">Available Models</h2>
 					{provider.models && provider.models.length > 0 ? (
 						<div className="space-y-3">
-							{provider.models.map((model) => (
+							{provider.models.map((model: any) => (
 								<div
 									key={model.id}
 									className="border border-surface1 rounded p-4 hover:bg-surface1 transition-colors"

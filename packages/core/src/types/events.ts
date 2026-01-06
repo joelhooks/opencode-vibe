@@ -15,10 +15,10 @@ export type {
 	DiscoveredServer,
 	DiscoveredSession,
 	DiscoveredProject,
-} from "../discovery/types.js"
+} from "../world/discovery/types.js"
 
 // Import for local usage
-import type { DiscoveredServer } from "../discovery/types.js"
+import type { DiscoveredServer } from "../world/discovery/types.js"
 
 /**
  * Backward-compatible SessionStatus (string union)

@@ -29,8 +29,13 @@ export const sse = {
 	 * @example
 	 * ```typescript
 	 * import { Effect, Stream, Schedule, Duration } from "effect"
+	 * import { discovery } from "@opencode-vibe/core"
 	 *
-	 * const stream = sse.connect({ url: "http://localhost:4056" })
+	 * // Get server URL from discovery service
+	 * const servers = await discovery.discover()
+	 * const url = servers[0]?.url // or use discovery.discoverOne()
+	 *
+	 * const stream = sse.connect({ url })
 	 *
 	 * await Effect.runPromise(
 	 *   Stream.runForEach(stream, (event) =>

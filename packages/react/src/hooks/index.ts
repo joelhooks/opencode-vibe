@@ -12,6 +12,7 @@ export { useWorldMessages } from "./use-world-messages"
 export { useWorldContextUsage } from "./use-world-context-usage"
 export { useWorldCompactionState } from "./use-world-compaction-state"
 export { useWorldSessionStatus } from "./use-world-session-status"
+export { useWorldDebug } from "./use-world-debug"
 
 // Unified Facade
 export {
@@ -30,13 +31,6 @@ export {
 	type UseCurrentProjectReturn,
 	type Project,
 } from "./use-projects"
-export {
-	useServers,
-	useCurrentServer,
-	type UseServersReturn,
-	type UseCurrentServerReturn,
-	type ServerInfo,
-} from "./use-servers"
 export { useProviders } from "./use-providers"
 
 // Actions
@@ -72,10 +66,6 @@ export {
 	type UseSSEOptions,
 	type UseSSEReturn,
 } from "./internal/use-sse"
-export {
-	useMultiServerSSE,
-	type UseMultiServerSSEOptions,
-} from "./internal/use-multi-server-sse"
 export {
 	useSubagents,
 	type UseSubagentsReturn,

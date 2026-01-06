@@ -167,10 +167,11 @@ export const SessionAtom = {
 					})
 					return result
 				},
-				catch: (error) =>
-					new Error(
+				catch: (error) => {
+					return new Error(
 						`Failed to send prompt: ${error instanceof Error ? error.message : String(error)}`,
-					),
+					)
+				},
 			})
 		}),
 

@@ -30,6 +30,16 @@ describe("useWorld", () => {
 		lastUpdated: 0,
 		byDirectory: new Map(),
 		stats: { total: 0, active: 0, streaming: 0 },
+		// Instance layer
+		instances: [],
+		instanceByPort: new Map(),
+		instancesByDirectory: new Map(),
+		connectedInstanceCount: 0,
+		// Project layer
+		projects: [],
+		projectByDirectory: new Map(),
+		// Routing layer
+		sessionToInstance: new Map(),
 	}
 
 	const connectedState: WorldState = {
@@ -175,5 +185,85 @@ describe("useWorld", () => {
 
 		// Unsubscribe should have been called
 		expect(mockUnsubscribe).toHaveBeenCalled()
+	})
+
+	it("reads initial instances from OpencodeSSRPlugin when available", () => {
+		// Reset for clean state
+		__resetWorldStream()
+
+		// Simulate OpencodeSSRPlugin injecting config
+		const mockInstances = [
+			{ port: 3000, directory: "/path/to/project", baseUrl: "/api/opencode/3000" },
+			{ port: 3001, directory: "/path/to/other", baseUrl: "/api/opencode/3001" },
+		]
+
+		// @ts-ignore - setting window.__OPENCODE for test
+		window.__OPENCODE = {
+			baseUrl: "/api/opencode",
+			directory: "/path/to/project",
+			instances: mockInstances,
+		}
+
+		const mockStream: WorldStreamHandle = {
+			subscribe: (callback) => {
+				callback(emptyState)
+				return () => {}
+			},
+			getSnapshot: async () => emptyState,
+			dispose: async () => {},
+			[Symbol.asyncIterator]: vi.fn(),
+		}
+
+		createWorldStream.mockReturnValue(mockStream)
+
+		renderHook(() => useWorld())
+
+		// createWorldStream should have been called with initialInstances
+		expect(createWorldStream).toHaveBeenCalledWith({
+			initialInstances: expect.arrayContaining([
+				expect.objectContaining({
+					port: 3000,
+					directory: "/path/to/project",
+					baseUrl: "/api/opencode/3000",
+					status: "connected",
+				}),
+				expect.objectContaining({
+					port: 3001,
+					directory: "/path/to/other",
+					baseUrl: "/api/opencode/3001",
+					status: "connected",
+				}),
+			]),
+		})
+
+		// Cleanup
+		// @ts-ignore
+		delete window.__OPENCODE
+	})
+
+	it("handles missing window.__OPENCODE gracefully", () => {
+		// Reset for clean state
+		__resetWorldStream()
+
+		// Ensure no config
+		// @ts-ignore
+		delete window.__OPENCODE
+
+		const mockStream: WorldStreamHandle = {
+			subscribe: (callback) => {
+				callback(emptyState)
+				return () => {}
+			},
+			getSnapshot: async () => emptyState,
+			dispose: async () => {},
+			[Symbol.asyncIterator]: vi.fn(),
+		}
+
+		createWorldStream.mockReturnValue(mockStream)
+
+		renderHook(() => useWorld())
+
+		// createWorldStream should have been called with undefined initialInstances
+		expect(createWorldStream).toHaveBeenCalledWith({ initialInstances: undefined })
 	})
 })

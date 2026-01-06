@@ -4,12 +4,7 @@ import { useState, createContext, useContext } from "react"
 import Link from "next/link"
 import type { UIMessage } from "ai"
 import { toast } from "sonner"
-import {
-	OpencodeSSRPlugin,
-	useSessionData,
-	useMessagesWithParts,
-	useSendMessage,
-} from "@opencode-vibe/react"
+import { useSessionData, useMessagesWithParts, useSendMessage } from "@opencode-vibe/react"
 import { useWorldSessionStatus } from "@opencode-vibe/react/hooks"
 import { NewSessionButton } from "./new-session-button"
 import { SessionMessages } from "./session-messages"
@@ -133,9 +128,13 @@ function SessionContent({
 
 	// Handle prompt submission
 	const handleSubmit = async (parts: Prompt) => {
+		console.log("[MessageSend] handleSubmit called", { parts, sessionId, directory })
 		try {
+			console.log("[MessageSend] Calling sendMessage...")
 			await sendMessage(parts)
+			console.log("[MessageSend] sendMessage completed successfully")
 		} catch (err) {
+			console.error("[MessageSend] ERROR in handleSubmit:", err)
 			toast.error("Failed to send message", {
 				description: err instanceof Error ? err.message : "An unknown error occurred",
 				duration: 5000,
@@ -250,7 +249,7 @@ function SessionContent({
 /**
  * Client component wrapper for session page
  *
- * Renders OpencodeSSRPlugin to inject config before React hydrates.
+ * OpencodeSSRPlugin now rendered at page level (outside Suspense) for proper SSR injection.
  * No longer needs OpencodeProvider - factory hooks work without it.
  * Server-provided initial data is used as fallback until SSE updates arrive.
  */
@@ -264,15 +263,6 @@ export function SessionLayout({
 }: SessionLayoutProps) {
 	return (
 		<>
-			{/* Inject OpenCode config for factory hooks - must have directory from URL */}
-			{directory && (
-				<OpencodeSSRPlugin
-					config={{
-						baseUrl: "/api/opencode",
-						directory,
-					}}
-				/>
-			)}
 			<SessionContent
 				sessionId={sessionId}
 				directory={directory}

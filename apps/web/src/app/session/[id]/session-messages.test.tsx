@@ -6,10 +6,58 @@ import { describe, test, expect } from "vitest"
  * Tests the fix for: Task cards not updating in real-time
  * Root cause: MessageRenderer memo didn't compare _opencode.state.metadata.summary
  *
+ * Also tests that SessionMessages uses World Stream hooks (not Zustand hydration).
+ *
  * Instead of rendering components (NO DOM TESTING), we test the memo comparison
  * function directly by simulating what React.memo receives as props.
  */
 describe("SessionMessages", () => {
+	describe("World Stream integration (opencode-next--xts0a-mk2shsphpsz)", () => {
+		test("component imports from World Stream hooks, not Zustand", async () => {
+			/**
+			 * Characterization test for bug fix: Session detail view not streaming messages
+			 *
+			 * ROOT CAUSE:
+			 * - SessionMessages was hydrating SSR data into Zustand store (useOpencodeStore.hydrateMessages)
+			 * - But reading from World Stream hooks (useMessagesWithParts, useSessionStatus)
+			 * - World Stream never saw the hydrated data → no messages displayed
+			 * - SSE events went to World Stream but UI showed "No messages yet"
+			 *
+			 * FIX:
+			 * - Removed Zustand hydration entirely
+			 * - World Stream hooks are reactive (useWorld → useSyncExternalStore)
+			 * - SSE events flow: WorldSSE → routeEvent → messagesAtom/partsAtom → notifySubscribers → React re-render
+			 * - Initial render uses initialMessages prop (zero-flicker)
+			 * - Once SSE connects, World Stream populates and hooks trigger re-render
+			 *
+			 * VERIFICATION:
+			 * - Component must NOT import useOpencodeStore
+			 * - Component must NOT call hydrateMessages
+			 * - Component MUST use reactive World Stream hooks
+			 */
+
+			// Read the source file to verify imports
+			const fs = await import("node:fs/promises")
+			const path = await import("node:path")
+			const filePath = path.join(__dirname, "session-messages.tsx")
+			const source = await fs.readFile(filePath, "utf-8")
+
+			// MUST NOT import useOpencodeStore (Zustand)
+			expect(source).not.toContain('from "@opencode-vibe/react/store"')
+			expect(source).not.toContain("useOpencodeStore")
+			expect(source).not.toContain("hydrateMessages")
+			expect(source).not.toContain("useEffect") // No manual hydration effects
+
+			// MUST import from reactive hooks
+			expect(source).toContain("useMessagesWithParts")
+			expect(source).toContain("useSessionStatus")
+			expect(source).toContain('from "@/app/hooks"')
+
+			// MUST use World Stream hooks directly (no registry access)
+			expect(source).not.toContain("getWorldRegistry")
+			expect(source).not.toContain("Registry.get")
+		})
+	})
 	describe("MessageRenderer memo comparison", () => {
 		/**
 		 * Helper to simulate the memo comparison function from MessageRenderer.

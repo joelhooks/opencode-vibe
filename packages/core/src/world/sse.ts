@@ -6,7 +6,7 @@
  * 2. Connects directly to server SSE endpoints
  * 3. Feeds events to WorldStore atoms
  *
- * Uses Discovery Layer from config (defaults to DiscoveryBrowserLive).
+ * Uses Discovery Layer from config (defaults to empty implementation).
  * This enables testing with mock Discovery implementations.
  */
 
@@ -47,7 +47,13 @@ import type { Project } from "../types/sdk.js"
 import { parseSSEEvent } from "../sse/parse.js"
 import type { SSEEvent as ParsedSSEEvent } from "../sse/schemas.js"
 import { routeEvent } from "./event-router.js"
-import { Discovery, DiscoveryBrowserLive, type DiscoveredServer } from "../discovery/index.js"
+import { Discovery, type DiscoveredServer } from "./discovery/index.js"
+
+// Default empty Discovery layer for when no discoveryLayer is provided in config
+const DiscoveryEmptyLive: Layer.Layer<Discovery> = Layer.succeed(Discovery, {
+	_tag: "Discovery" as const,
+	discover: () => Effect.succeed([]),
+})
 
 // ============================================================================
 // Types
@@ -70,14 +76,18 @@ export interface WorldSSEConfig {
 	/** Callback for raw SSE events (for logging/debugging) */
 	onEvent?: (event: SSEEventInfo) => void
 	/**
-	 * Discovery Layer (default: DiscoveryBrowserLive)
+	 * Discovery Layer (default: empty implementation that returns [])
 	 *
 	 * Inject custom Discovery implementation for testing or Node.js environments.
-	 * Browser: DiscoveryBrowserLive (fetch to /api/opencode/servers)
-	 * Node.js: DiscoveryNodeLive (lsof process scanning)
-	 * Testing: Use makeTestLayer from ../discovery
+	 * Node.js: DiscoveryNodeLive from @opencode-vibe/core/world/discovery/node (lsof process scanning)
+	 * Testing: Use Layer.succeed(Discovery, { discover: () => Effect.succeed([...]) })
 	 */
 	discoveryLayer?: Layer.Layer<Discovery>
+	/**
+	 * Initial instances from SSR discovery
+	 * Bypasses discovery loop and connects to these ports immediately
+	 */
+	initialInstances?: Instance[]
 }
 
 // ============================================================================
@@ -215,7 +225,10 @@ export function connectToSSE(port: number): Stream.Stream<SSEEvent, Error> {
  */
 export class WorldSSE {
 	private registry: Registry.Registry
-	private config: Required<WorldSSEConfig>
+	private config: Omit<Required<WorldSSEConfig>, "discoveryLayer" | "initialInstances"> & {
+		discoveryLayer?: Layer.Layer<Discovery>
+		initialInstances?: Instance[]
+	}
 	private running = false
 	private discoveryFiber: Fiber.RuntimeFiber<void, Error> | null = null
 	private connectionFibers = new Map<number, Fiber.RuntimeFiber<void, Error>>()
@@ -230,7 +243,8 @@ export class WorldSSE {
 			autoReconnect: config.autoReconnect ?? true,
 			maxReconnectAttempts: config.maxReconnectAttempts ?? 10,
 			onEvent: config.onEvent ?? (() => {}),
-			discoveryLayer: config.discoveryLayer ?? DiscoveryBrowserLive,
+			discoveryLayer: config.discoveryLayer,
+			initialInstances: config.initialInstances,
 		}
 	}
 
@@ -260,6 +274,15 @@ export class WorldSSE {
 			const url = new URL(this.config.serverUrl)
 			const port = parseInt(url.port || "1999", 10)
 			this.connectToServer(port)
+			return
+		}
+
+		// If initialInstances provided (from SSR), connect immediately and skip discovery
+		if (this.config.initialInstances && this.config.initialInstances.length > 0) {
+			this.registry.set(connectionStatusAtom, "connecting")
+			for (const instance of this.config.initialInstances) {
+				this.connectToServer(instance.port)
+			}
 			return
 		}
 
@@ -315,7 +338,7 @@ export class WorldSSE {
 			const servers = yield* discovery.discover()
 
 			// Convert DiscoveredServer[] to Instance[] and feed to Registry
-			const instances = servers.map((server) => ({
+			const instances = servers.map((server: DiscoveredServer) => ({
 				port: server.port,
 				pid: server.pid,
 				directory: server.directory,
@@ -327,11 +350,11 @@ export class WorldSSE {
 			}))
 
 			// Feed instances to Registry - convert array to Map keyed by port
-			const instanceMap = new Map(instances.map((i) => [i.port, i]))
+			const instanceMap = new Map(instances.map((i: Instance) => [i.port, i]))
 			this.registry.set(instancesAtom, instanceMap)
 
 			// Connect to new servers
-			const activePorts = new Set(servers.map((s) => s.port))
+			const activePorts = new Set(servers.map((s: DiscoveredServer) => s.port))
 
 			for (const server of servers) {
 				if (!this.connectedPorts.has(server.port)) {
@@ -366,8 +389,8 @@ export class WorldSSE {
 			Effect.repeat(Schedule.fixed(this.config.discoveryIntervalMs)),
 			Effect.asVoid,
 			Effect.interruptible,
-			// Provide Discovery layer from config
-			Effect.provide(this.config.discoveryLayer),
+			// Provide Discovery layer from config (or use default empty implementation)
+			Effect.provide(this.config.discoveryLayer ?? DiscoveryEmptyLive),
 		)
 
 		this.discoveryFiber = Effect.runFork(discoveryEffect)
@@ -479,7 +502,43 @@ export class WorldSSE {
 			const sessionMap = new Map(sessions.map((s) => [s.id, s]))
 			this.registry.set(sessionsAtom, sessionMap)
 			this.registry.set(statusAtom, statusMap)
-			// Connection status is managed by startDiscoveryLoop() or when connectedPorts updates
+
+			// CRITICAL FIX: Fetch messages and parts for each session
+			// This populates messagesAtom and partsAtom so UI shows messages immediately
+			for (const session of sessions) {
+				const messages = yield* Effect.tryPromise(() =>
+					fetch(`${baseUrl}/session/${session.id}/message`).then(
+						(r) => r.json() as Promise<Message[]>,
+					),
+				).pipe(Effect.catchAll(() => Effect.succeed([] as Message[])))
+
+				const existingMessages = this.registry.get(messagesAtom)
+				const updatedMessages = new Map(existingMessages)
+				for (const message of messages) {
+					updatedMessages.set(message.id, message)
+				}
+				this.registry.set(messagesAtom, updatedMessages)
+
+				for (const message of messages) {
+					// Skip messages without valid IDs
+					if (!message.id) {
+						continue
+					}
+
+					const parts = yield* Effect.tryPromise(() =>
+						fetch(`${baseUrl}/session/${session.id}/message/${message.id}/part`).then(
+							(r) => r.json() as Promise<Part[]>,
+						),
+					).pipe(Effect.catchAll(() => Effect.succeed([] as Part[])))
+
+					const existingParts = this.registry.get(partsAtom)
+					const updatedParts = new Map(existingParts)
+					for (const part of parts) {
+						updatedParts.set(part.id, part)
+					}
+					this.registry.set(partsAtom, updatedParts)
+				}
+			}
 
 			// Update projects - merge with existing projects from other instances
 			if (project) {
@@ -571,7 +630,7 @@ export class SSEService extends Context.Tag("SSEService")<SSEService, SSEService
  * Pattern from cursor-store.ts: Layer.scoped wraps WorldSSE class,
  * providing Effect-native lifecycle management.
  *
- * Composes with Discovery layer from config (defaults to DiscoveryBrowserLive).
+ * Composes with Discovery layer from config (defaults to empty implementation).
  * This enables testing with mock Discovery implementations.
  *
  * @param registry - Registry to feed events into
@@ -579,7 +638,7 @@ export class SSEService extends Context.Tag("SSEService")<SSEService, SSEService
  *
  * @example
  * ```typescript
- * // Default discovery (DiscoveryBrowserLive)
+ * // Default discovery (empty implementation - returns [])
  * const program = Effect.gen(function* () {
  *   const sseService = yield* SSEService
  *   yield* sseService.start()
@@ -592,13 +651,11 @@ export class SSEService extends Context.Tag("SSEService")<SSEService, SSEService
  *   program.pipe(Effect.provide(SSEServiceLive(registry)))
  * )
  *
- * // Custom discovery for testing
- * const MockDiscoveryLive = Layer.succeed(Discovery, {
- *   discover: () => Effect.succeed([{ port: 3000, pid: 123, directory: "/test" }])
- * })
+ * // Custom discovery for Node.js
+ * import { DiscoveryNodeLive } from "@opencode-vibe/core/world/discovery/node"
  * Effect.runPromise(
  *   program.pipe(
- *     Effect.provide(SSEServiceLive(registry, { discoveryLayer: MockDiscoveryLive }))
+ *     Effect.provide(SSEServiceLive(registry, { discoveryLayer: DiscoveryNodeLive }))
  *   )
  * )
  * ```

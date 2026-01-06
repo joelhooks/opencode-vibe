@@ -5,7 +5,8 @@
  * Uses createWorldStream from core for SSE-wired atom-based state.
  */
 
-import { createWorldStream } from "@opencode-vibe/core/world"
+import { createMergedWorldStream } from "@opencode-vibe/core/world"
+import { DiscoveryNodeLive } from "@opencode-vibe/core/world/discovery/node"
 import type { CommandContext } from "./index.js"
 import { write, withLinks } from "../output.js"
 import { formatWorldState, type ProjectState } from "../world-state.js"
@@ -17,8 +18,8 @@ export async function run(context: CommandContext): Promise<void> {
 		console.log("🔍 Discovering servers...\n")
 	}
 
-	// Create world stream - it handles discovery and SSE internally
-	const stream = createWorldStream()
+	// Create world stream - use Node.js discovery for CLI
+	const stream = createMergedWorldStream({ discoveryLayer: DiscoveryNodeLive })
 
 	try {
 		// Wait a moment for bootstrap to complete

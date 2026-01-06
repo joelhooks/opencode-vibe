@@ -10,7 +10,7 @@ import { ThemeToggle } from "@/components/theme-toggle"
  * Catches errors from server components and displays user-friendly error screen.
  * Special handling for NoServersDiscoveredError.
  */
-export default function Error({
+export default function ErrorBoundary({
 	error,
 	reset,
 }: {
@@ -58,7 +58,7 @@ export default function Error({
 										Start an OpenCode server:
 									</h2>
 									<pre className="bg-background border border-border rounded px-4 py-3 text-sm overflow-x-auto">
-										<code className="text-foreground/90">opencode --port 4056</code>
+										<code className="text-foreground/90">opencode</code>
 									</pre>
 								</div>
 

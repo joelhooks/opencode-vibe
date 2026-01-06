@@ -1,10 +1,21 @@
 import { notFound } from "next/navigation"
 import { Suspense } from "react"
-import { createClientSSR } from "@opencode-vibe/core"
+import { createClientSSR } from "@opencode-vibe/core/ssr"
 import { transformMessages, type OpencodeMessage } from "@/lib/transform-messages"
 import type { Session } from "@opencode-ai/sdk/client"
 import { SessionLayout } from "./session-layout"
 import { Loader } from "@/components/ai-elements/loader"
+import { Effect } from "effect"
+import { Discovery } from "@opencode-vibe/core/discovery"
+import { DiscoveryNodeLive } from "@opencode-vibe/core/world/discovery/node"
+import { SSRConfigInjector } from "./ssr-config-injector"
+
+// OpencodeInstance type for SSR plugin
+interface OpencodeInstance {
+	port: number
+	directory: string
+	baseUrl: string
+}
 
 // SDK returns messages as {info: Message, parts: Part[]} envelope
 type SDKMessageEnvelope = {
@@ -20,6 +31,35 @@ type SDKMessageEnvelope = {
 interface Props {
 	params: Promise<{ id: string }>
 	searchParams: Promise<{ dir?: string }>
+}
+
+/**
+ * Discover OpenCode servers for SSR (NOT cached - used for initial instances)
+ */
+async function discoverServers(): Promise<OpencodeInstance[]> {
+	try {
+		const servers = await Effect.runPromise(
+			Effect.gen(function* () {
+				const discovery = yield* Discovery
+				return yield* discovery.discover()
+			}).pipe(
+				Effect.provide(DiscoveryNodeLive),
+				Effect.timeout("5 seconds"), // Prevent hanging forever
+				Effect.catchAll(() => Effect.succeed([])), // Return empty on timeout
+			),
+		)
+
+		// Convert DiscoveredServer[] to OpencodeInstance[] for client
+		// Use browser proxy URLs since client will connect through Next.js
+		return servers.map((server) => ({
+			port: server.port,
+			directory: server.directory,
+			baseUrl: `/api/opencode/${server.port}`,
+		}))
+	} catch (error) {
+		console.warn("[SSR] Discovery failed:", error)
+		return []
+	}
 }
 
 /**
@@ -135,7 +175,7 @@ async function SessionContent({
 	const { id: sessionId } = await paramsPromise
 	const { dir: directory } = await searchParamsPromise
 
-	// Fetch both in parallel
+	// Fetch session and messages in parallel
 	const [session, messageData] = await Promise.all([
 		getSession(sessionId, directory),
 		getMessages(sessionId, directory),
@@ -172,17 +212,32 @@ function SessionLoading() {
 /**
  * Session detail page - Server Component
  *
- * Passes params/searchParams promises to child component
- * so they can be awaited inside Suspense boundary.
+ * CRITICAL: Must await searchParams BEFORE calling discoverServers() to mark route as dynamic.
+ * Even creating a promise without awaiting it CALLS the function, which runs Effect code
+ * that uses Date.now() at initialization time, causing Next.js 16 prerendering error.
  */
-export default function SessionPage({ params, searchParams }: Props) {
+export default async function SessionPage({ params, searchParams }: Props) {
+	// AWAIT searchParams FIRST - this marks route as dynamic BEFORE any Date.now() calls
+	await searchParams
+
+	// NOW we can safely call discoverServers (which uses Effect/Date.now internally)
+	const discoveredInstances = await discoverServers()
+	console.log("[SSR] Discovered instances for client:", discoveredInstances)
+
 	return (
-		<div className="h-dvh flex flex-col bg-background">
-			<div className="flex-1 flex flex-col min-h-0">
-				<Suspense fallback={<SessionLoading />}>
-					<SessionContent paramsPromise={params} searchParamsPromise={searchParams} />
-				</Suspense>
+		<>
+			{/* Pass resolved values directly to client component */}
+			<SSRConfigInjector
+				searchParamsPromise={searchParams}
+				discoveredInstancesPromise={Promise.resolve(discoveredInstances)}
+			/>
+			<div className="h-dvh flex flex-col bg-background">
+				<div className="flex-1 flex flex-col min-h-0">
+					<Suspense fallback={<SessionLoading />}>
+						<SessionContent paramsPromise={params} searchParamsPromise={searchParams} />
+					</Suspense>
+				</div>
 			</div>
-		</div>
+		</>
 	)
 }

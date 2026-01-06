@@ -19,7 +19,7 @@ const mockFetch = vi.fn()
 global.fetch = mockFetch as any
 
 // Import after mocks are set up
-const { DiscoveryNodeLive } = await import("./discovery.node.js")
+const { DiscoveryNodeLive } = await import("./node.js")
 
 describe("DiscoveryNodeLive", () => {
 	beforeEach(() => {

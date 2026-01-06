@@ -10,6 +10,7 @@
  */
 
 import { createMergedWorldStream, type WorldState } from "@opencode-vibe/core/world"
+import { DiscoveryNodeLive } from "@opencode-vibe/core/world/discovery/node"
 import { existsSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -192,8 +193,9 @@ export async function run(context: CommandContext): Promise<void> {
 			sources.push(createSwarmDbSource(defaultSwarmDbPath))
 		}
 
-		// Create merged world stream with optional event logging
+		// Create merged world stream with Node.js discovery
 		stream = createMergedWorldStream({
+			discoveryLayer: DiscoveryNodeLive,
 			sources,
 			onEvent: options.debug
 				? (event) => {

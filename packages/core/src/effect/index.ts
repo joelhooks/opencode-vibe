@@ -18,11 +18,6 @@ export { PartAtom } from "../atoms/parts.js"
 export { ProviderAtom, type Provider, type Model } from "../atoms/providers.js"
 export { ProjectAtom, type Project } from "../atoms/projects.js"
 export { PromptUtil, type AutocompleteState } from "../atoms/prompt.js"
-export {
-	ServerAtom,
-	DEFAULT_SERVER,
-	selectBestServer,
-} from "../atoms/servers.js"
 export { SSEAtom, makeSSEAtom, sseAtom, type SSEConfig } from "../atoms/sse.js"
 export {
 	SubagentAtom,

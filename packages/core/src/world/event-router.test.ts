@@ -517,4 +517,223 @@ describe("Event Router", () => {
 			expect(sessions.get("session-1")?.title).toBe("Test Session")
 		})
 	})
+
+	describe("sessionId filtering", () => {
+		it("should store messages from different sessions in messagesAtom", () => {
+			// Add message for session-1
+			const msg1Event: SSEEvent = {
+				type: "message.updated",
+				properties: {
+					info: {
+						id: "msg-1",
+						sessionID: "session-1",
+						role: "user",
+						time: { created: 1000 },
+					},
+				},
+			}
+			routeEvent(msg1Event, registry, 3000)
+
+			// Add message for session-2
+			const msg2Event: SSEEvent = {
+				type: "message.updated",
+				properties: {
+					info: {
+						id: "msg-2",
+						sessionID: "session-2",
+						role: "assistant",
+						time: { created: 2000 },
+					},
+				},
+			}
+			routeEvent(msg2Event, registry, 3000)
+
+			// Both messages should be in messagesAtom
+			const messages = registry.get(messagesAtom)
+			expect(messages.size).toBe(2)
+
+			// Verify each message has correct sessionID
+			const msg1 = messages.get("msg-1")
+			expect(msg1?.sessionID).toBe("session-1")
+			expect(msg1?.role).toBe("user")
+
+			const msg2 = messages.get("msg-2")
+			expect(msg2?.sessionID).toBe("session-2")
+			expect(msg2?.role).toBe("assistant")
+		})
+
+		it("should store parts from different sessions in partsAtom", () => {
+			// Add part for session-1
+			const part1Event: SSEEvent = {
+				type: "message.part.updated",
+				properties: {
+					part: {
+						id: "part-1",
+						sessionID: "session-1",
+						messageID: "msg-1",
+						type: "text",
+						text: "Hello from session 1",
+					},
+				},
+			}
+			routeEvent(part1Event, registry, 3000)
+
+			// Add part for session-2
+			const part2Event: SSEEvent = {
+				type: "message.part.updated",
+				properties: {
+					part: {
+						id: "part-2",
+						sessionID: "session-2",
+						messageID: "msg-2",
+						type: "text",
+						text: "Hello from session 2",
+					},
+				},
+			}
+			routeEvent(part2Event, registry, 3000)
+
+			// Both parts should be in partsAtom
+			const parts = registry.get(partsAtom)
+			expect(parts.size).toBe(2)
+
+			// Verify each part has correct sessionID
+			const part1 = parts.get("part-1")
+			expect(part1?.sessionID).toBe("session-1")
+			expect(part1?.type).toBe("text")
+			if (part1?.type === "text") {
+				expect(part1.text).toBe("Hello from session 1")
+			}
+
+			const part2 = parts.get("part-2")
+			expect(part2?.sessionID).toBe("session-2")
+			expect(part2?.type).toBe("text")
+			if (part2?.type === "text") {
+				expect(part2.text).toBe("Hello from session 2")
+			}
+		})
+
+		it("should allow filtering messages by sessionID from messagesAtom", () => {
+			// Setup: Add multiple messages for different sessions
+			const events: SSEEvent[] = [
+				{
+					type: "message.updated",
+					properties: {
+						info: {
+							id: "msg-1",
+							sessionID: "session-1",
+							role: "user",
+							time: { created: 1000 },
+						},
+					},
+				},
+				{
+					type: "message.updated",
+					properties: {
+						info: {
+							id: "msg-2",
+							sessionID: "session-1",
+							role: "assistant",
+							time: { created: 2000 },
+						},
+					},
+				},
+				{
+					type: "message.updated",
+					properties: {
+						info: {
+							id: "msg-3",
+							sessionID: "session-2",
+							role: "user",
+							time: { created: 3000 },
+						},
+					},
+				},
+			]
+
+			for (const event of events) {
+				routeEvent(event, registry, 3000)
+			}
+
+			// Query messagesAtom and filter by sessionID
+			const messages = registry.get(messagesAtom)
+			const session1Messages = Array.from(messages.values()).filter(
+				(msg) => msg.sessionID === "session-1",
+			)
+			const session2Messages = Array.from(messages.values()).filter(
+				(msg) => msg.sessionID === "session-2",
+			)
+
+			// Verify filtering works correctly
+			expect(session1Messages).toHaveLength(2)
+			expect(session1Messages[0].id).toBe("msg-1")
+			expect(session1Messages[1].id).toBe("msg-2")
+
+			expect(session2Messages).toHaveLength(1)
+			expect(session2Messages[0].id).toBe("msg-3")
+		})
+
+		it("should allow filtering parts by sessionID from partsAtom", () => {
+			// Setup: Add multiple parts for different sessions
+			const events: SSEEvent[] = [
+				{
+					type: "message.part.updated",
+					properties: {
+						part: {
+							id: "part-1",
+							sessionID: "session-1",
+							messageID: "msg-1",
+							type: "text",
+							text: "Part 1",
+						},
+					},
+				},
+				{
+					type: "message.part.updated",
+					properties: {
+						part: {
+							id: "part-2",
+							sessionID: "session-1",
+							messageID: "msg-1",
+							type: "text",
+							text: "Part 2",
+						},
+					},
+				},
+				{
+					type: "message.part.updated",
+					properties: {
+						part: {
+							id: "part-3",
+							sessionID: "session-2",
+							messageID: "msg-2",
+							type: "text",
+							text: "Part 3",
+						},
+					},
+				},
+			]
+
+			for (const event of events) {
+				routeEvent(event, registry, 3000)
+			}
+
+			// Query partsAtom and filter by sessionID
+			const parts = registry.get(partsAtom)
+			const session1Parts = Array.from(parts.values()).filter(
+				(part) => part.sessionID === "session-1",
+			)
+			const session2Parts = Array.from(parts.values()).filter(
+				(part) => part.sessionID === "session-2",
+			)
+
+			// Verify filtering works correctly
+			expect(session1Parts).toHaveLength(2)
+			expect(session1Parts[0].id).toBe("part-1")
+			expect(session1Parts[1].id).toBe("part-2")
+
+			expect(session2Parts).toHaveLength(1)
+			expect(session2Parts[0].id).toBe("part-3")
+		})
+	})
 })

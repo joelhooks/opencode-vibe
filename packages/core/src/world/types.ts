@@ -221,6 +221,12 @@ export interface WorldStreamConfig {
 	 * Callback for raw SSE events (for logging/debugging)
 	 */
 	onEvent?: (event: SSEEventInfo) => void
+
+	/**
+	 * Initial instances from SSR discovery
+	 * Bypasses client-side discovery and populates instancesAtom immediately
+	 */
+	initialInstances?: Instance[]
 }
 
 /**

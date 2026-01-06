@@ -20,6 +20,7 @@ import {
 	AgentPart,
 	RetryPart,
 	CompactionPart,
+	SubtaskPart,
 	Part,
 	SessionCreatedEvent,
 	SessionUpdatedEvent,
@@ -88,6 +89,25 @@ describe("Part Schemas", () => {
 		expect(result.state).toEqual({ status: "running" })
 	})
 
+	it("SubtaskPart has PartBase fields + subtask metadata", () => {
+		const input = {
+			id: "part-123",
+			sessionID: "sess-456",
+			messageID: "msg-789",
+			type: "subtask",
+			prompt: "Do the thing",
+			description: "A detailed task",
+			agent: "worker-1",
+		}
+
+		const result = Schema.decodeUnknownSync(SubtaskPart)(input)
+
+		expect(result.type).toBe("subtask")
+		expect(result.prompt).toBe("Do the thing")
+		expect(result.description).toBe("A detailed task")
+		expect(result.agent).toBe("worker-1")
+	})
+
 	it("Part union discriminates by type", () => {
 		const textInput = {
 			id: "part-1",
@@ -105,11 +125,23 @@ describe("Part Schemas", () => {
 			tool: "bash",
 		}
 
+		const subtaskInput = {
+			id: "part-3",
+			sessionID: "sess-3",
+			messageID: "msg-3",
+			type: "subtask",
+			prompt: "Run task",
+			description: "Task description",
+			agent: "worker",
+		}
+
 		const textResult = Schema.decodeUnknownSync(Part)(textInput)
 		const toolResult = Schema.decodeUnknownSync(Part)(toolInput)
+		const subtaskResult = Schema.decodeUnknownSync(Part)(subtaskInput)
 
 		expect(textResult.type).toBe("text")
 		expect(toolResult.type).toBe("tool")
+		expect(subtaskResult.type).toBe("subtask")
 	})
 })
 
@@ -267,6 +299,32 @@ describe("Part Event Schemas", () => {
 		const result = Schema.decodeUnknownSync(MessagePartUpdatedEvent)(input)
 
 		expect(result.properties.delta).toBe(" world")
+	})
+
+	it("MessagePartUpdatedEvent handles subtask parts", () => {
+		const input = {
+			type: "message.part.updated",
+			properties: {
+				part: {
+					id: "part-123",
+					sessionID: "sess-456",
+					messageID: "msg-789",
+					type: "subtask",
+					prompt: "Execute task",
+					description: "Task details",
+					agent: "worker-1",
+				},
+			},
+		}
+
+		const result = Schema.decodeUnknownSync(MessagePartUpdatedEvent)(input)
+
+		expect(result.type).toBe("message.part.updated")
+		expect(result.properties.part.type).toBe("subtask")
+		if (result.properties.part.type === "subtask") {
+			expect(result.properties.part.prompt).toBe("Execute task")
+			expect(result.properties.part.agent).toBe("worker-1")
+		}
 	})
 
 	it("MessagePartRemovedEvent has sessionID, messageID, partID", () => {

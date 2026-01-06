@@ -1,8 +1,24 @@
 /**
- * useMessages - Store selector for messages with real-time SSE updates
+ * useMessages - Get messages for a session from World Stream
  *
- * Selects messages from Zustand store populated by SSE events.
- * Returns empty array if session has no messages (avoids undefined issues).
+ * MIGRATED from Zustand to World Stream (vancouver-auto-detail-pro--frahg-mk2q6th1yn2)
+ *
+ * Derives from useWorld() - no additional subscriptions needed.
+ * Returns empty array if session not found.
+ *
+ * ARCHITECTURE (ADR-016, ADR-018):
+ * - Core owns computation (WorldStore, derived state)
+ * - React binds UI (useSyncExternalStore via useWorld)
+ * - Derived hooks just select from useWorld()
+ *
+ * BACKWARD COMPATIBILITY:
+ * - Returns EnrichedMessage[] (superset of Message with parts, isStreaming)
+ * - Always returns array (never undefined)
+ * - Maintains same API as Zustand version
+ *
+ * IMPORT CONSTRAINT:
+ * - ONLY import from @opencode-vibe/core/world (for types)
+ * - Import useWorld from ../use-world.js
  *
  * @example
  * ```tsx
@@ -20,21 +36,28 @@
 
 "use client"
 
-import type { Message } from "@opencode-vibe/core/types"
-import { useOpencodeStore } from "../../store"
-import { useOpencode } from "../../providers"
-
-const EMPTY_MESSAGES: Message[] = []
+import { useMemo } from "react"
+import { useWorld } from "../use-world.js"
+// Import from specific file to avoid barrel file pulling in Node.js-only deps
+import type { EnrichedMessage } from "@opencode-vibe/core/world/types"
 
 /**
- * Hook to get messages for a session from store
+ * useMessages - Get messages for a session
  *
- * @param sessionId - Session ID to fetch messages for
- * @returns Array of messages, sorted by ID (empty array if none)
+ * Derives messages from useWorld().sessions by finding the session
+ * and returning its messages array. Returns empty array if session not found.
+ *
+ * Uses useMemo to prevent unnecessary re-renders when world.sessions
+ * reference changes but the actual messages for this sessionId haven't changed.
+ *
+ * @param sessionId - The session ID to get messages for
+ * @returns EnrichedMessage[] - Messages for the session, or empty array if not found
  */
-export function useMessages(sessionId: string): Message[] {
-	const { directory } = useOpencode()
-	return useOpencodeStore(
-		(state) => state.directories[directory]?.messages[sessionId] ?? EMPTY_MESSAGES,
-	)
+export function useMessages(sessionId: string): EnrichedMessage[] {
+	const world = useWorld()
+
+	return useMemo(() => {
+		const session = world.sessions.find((s) => s.id === sessionId)
+		return session?.messages ?? []
+	}, [world.sessions, sessionId])
 }

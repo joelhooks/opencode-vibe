@@ -271,13 +271,11 @@ export const useOpencodeStore = create<OpencodeState & OpencodeActions>()(
 					// ═══════════════════════════════════════════════════════════════
 					case "provider.updated": {
 						// TODO: Update provider in state when DirectoryState has providers array
-						console.log("[SSE] provider.updated:", event.properties)
 						break
 					}
 
 					case "project.updated": {
 						// TODO: Update project in state when DirectoryState has projects array
-						console.log("[SSE] project.updated:", event.properties)
 						break
 					}
 				}

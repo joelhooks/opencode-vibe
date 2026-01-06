@@ -13,8 +13,8 @@ export { createWorldStream } from "./stream.js"
 export type { WorldState, WorldStreamConfig, WorldStreamHandle } from "./stream.js"
 export type { SSEEventInfo } from "./types.js"
 
-// Discovery types only - for Node.js discovery, import from "@opencode-vibe/core/discovery/server"
-export type { DiscoveredServer } from "../discovery/server-discovery.js"
+// Discovery types only - for Node.js discovery, import from "@opencode-vibe/core/world/discovery/node"
+export type { DiscoveredServer } from "./discovery/types.js"
 
 // SSE internals (for advanced usage)
 export { WorldSSE, createWorldSSE, connectToSSE, SSEService, SSEServiceLive } from "./sse.js"

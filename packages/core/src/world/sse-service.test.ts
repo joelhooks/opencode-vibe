@@ -9,7 +9,7 @@ import { describe, expect, it, beforeEach } from "vitest"
 import { Effect, Layer } from "effect"
 import { SSEService, SSEServiceLive } from "./sse.js"
 import { Registry, connectionStatusAtom } from "./atoms.js"
-import { Discovery, type DiscoveredServer } from "../discovery/index.js"
+import { Discovery, type DiscoveredServer } from "./discovery/index.js"
 
 describe("SSEService - Effect.Service Pattern", () => {
 	let registry: Registry.Registry
@@ -133,18 +133,21 @@ describe("SSEService - Effect.Service Pattern", () => {
 		)
 	})
 
-	it("uses DiscoveryBrowserLive by default when no discoveryLayer provided", async () => {
-		// RED: This should pass once we wire default Discovery layer
+	it("works without discoveryLayer when serverUrl is provided", async () => {
+		// Discovery is now optional - serverUrl takes precedence
 
 		const program = Effect.gen(function* () {
 			const service = yield* SSEService
 			yield* service.start()
 
-			// Default discovery should be used (DiscoveryBrowserLive)
-			// This test verifies the service starts without errors
+			// This test verifies the service starts without errors when using direct serverUrl
 			yield* service.stop()
 		})
 
-		await Effect.runPromise(program.pipe(Effect.provide(SSEServiceLive(registry))))
+		await Effect.runPromise(
+			program.pipe(
+				Effect.provide(SSEServiceLive(registry, { serverUrl: "http://localhost:1999" })),
+			),
+		)
 	})
 })

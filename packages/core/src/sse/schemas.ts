@@ -118,6 +118,16 @@ export class CompactionPart extends PartBase.extend<CompactionPart>("CompactionP
 }) {}
 
 /**
+ * SubtaskPart - Subtask invocation
+ */
+export class SubtaskPart extends PartBase.extend<SubtaskPart>("SubtaskPart")({
+	type: S.Literal("subtask"),
+	prompt: S.String,
+	description: S.String,
+	agent: S.String,
+}) {}
+
+/**
  * Part - Discriminated union of all part types
  */
 export const Part = S.Union(
@@ -132,6 +142,7 @@ export const Part = S.Union(
 	AgentPart,
 	RetryPart,
 	CompactionPart,
+	SubtaskPart,
 )
 export type Part = S.Schema.Type<typeof Part>
 

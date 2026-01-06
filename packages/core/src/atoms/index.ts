@@ -11,7 +11,6 @@
 export { SessionAtom } from "./sessions.js"
 export { MessageAtom } from "./messages.js"
 export { PartAtom } from "./parts.js"
-export { ServerAtom, DEFAULT_SERVER, selectBestServer } from "./servers.js"
 export { SSEAtom, makeSSEAtom, sseAtom, type SSEConfig } from "./sse.js"
 
 // Batch 2 - COMPLETED (Pure Effect programs / utilities)

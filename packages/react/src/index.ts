@@ -14,10 +14,6 @@ export {
 	type UseSSEOptions,
 	type UseSSEReturn,
 } from "./hooks/internal/use-sse"
-export {
-	useMultiServerSSE,
-	type UseMultiServerSSEOptions,
-} from "./hooks/internal/use-multi-server-sse"
 export { useMessages } from "./hooks/internal/use-messages"
 export { useParts } from "./hooks/internal/use-parts"
 export {
@@ -75,14 +71,6 @@ export {
 export type { Session, Message, Part } from "@opencode-vibe/core/types"
 
 // Effect-based hooks (Phase 3b: Effect atom migration)
-export {
-	useServers,
-	useServersEffect,
-	useCurrentServer,
-	type UseServersReturn,
-	type UseCurrentServerReturn,
-	type ServerInfo,
-} from "./hooks/use-servers"
 export { useSessionData } from "./hooks/use-session-data"
 export { useSessionList } from "./hooks/use-session-list"
 export { useSessionStatus } from "./hooks/internal/use-session-status"
@@ -130,3 +118,4 @@ export { useWorld } from "./hooks/use-world"
 export { useWorldConnection, type ConnectionStatus } from "./hooks/use-world-connection"
 export { useWorldMessages } from "./hooks/use-world-messages"
 export { useWorldSession } from "./hooks/use-world-session"
+export { useWorldDebug } from "./hooks/use-world-debug"

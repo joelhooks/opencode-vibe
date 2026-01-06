@@ -3,15 +3,15 @@
 /**
  * Server Status Display Component
  *
- * Client component that shows discovered OpenCode servers.
- * Uses Effect-based discovery hooks from @opencode-vibe/react.
+ * Client component that shows connection status to OpenCode server.
+ * Browser-side discovery removed - server URL provided via SSR.
  */
 
 import { OpencodeSSRPlugin } from "@opencode-vibe/react"
-import { useServersEffect } from "@/app/hooks"
+import { useConnectionStatus } from "@/app/hooks"
 
 export function ServerStatus() {
-	const { servers, loading, error } = useServersEffect()
+	const { connected, discovering, serverCount } = useConnectionStatus()
 
 	return (
 		<>
@@ -22,13 +22,13 @@ export function ServerStatus() {
 					directory: "", // No specific directory for global operations
 				}}
 			/>
-			{loading ? (
-				<div className="text-xs text-muted-foreground">Discovering servers...</div>
-			) : error ? (
-				<div className="text-xs text-destructive">Server discovery error</div>
+			{discovering ? (
+				<div className="text-xs text-muted-foreground">Connecting to server...</div>
+			) : !connected ? (
+				<div className="text-xs text-destructive">Server disconnected</div>
 			) : (
 				<div className="text-xs text-muted-foreground">
-					{servers.length} server{servers.length !== 1 ? "s" : ""} available
+					Connected to {serverCount} server{serverCount !== 1 ? "s" : ""}
 				</div>
 			)}
 		</>

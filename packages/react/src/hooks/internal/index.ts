@@ -32,9 +32,5 @@ export {
 	type UseSSEOptions,
 	type UseSSEReturn,
 } from "./use-sse"
-export {
-	useMultiServerSSE,
-	type UseMultiServerSSEOptions,
-} from "./use-multi-server-sse"
 export { useLiveTime } from "./use-live-time"
 export { useProvider } from "./use-provider"

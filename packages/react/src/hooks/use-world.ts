@@ -51,11 +51,38 @@ let globalStream: WorldStreamHandle | null = null
 let cachedState: WorldState | null = null
 
 /**
+ * Get initial instances from OpencodeSSRPlugin config
+ * Returns undefined if no config or no instances
+ */
+function getInitialInstances(): WorldState["instances"] | undefined {
+	if (typeof window === "undefined") {
+		return undefined
+	}
+
+	const config = (window as any).__OPENCODE
+
+	if (!config?.instances) {
+		return undefined
+	}
+
+	// Convert OpencodeInstance[] to Instance[] format
+	return config.instances.map((i: any) => ({
+		port: i.port,
+		pid: 0, // Unknown from SSR
+		directory: i.directory,
+		status: "connected" as const,
+		baseUrl: i.baseUrl,
+		lastSeen: Date.now(),
+	}))
+}
+
+/**
  * Get or create the global stream instance
  */
 function getStream(): WorldStreamHandle {
 	if (!globalStream) {
-		globalStream = createWorldStream()
+		const initialInstances = getInitialInstances()
+		globalStream = createWorldStream({ initialInstances })
 	}
 	return globalStream
 }
@@ -150,4 +177,6 @@ export function getWorldRegistry() {
 export function __resetWorldStream(): void {
 	globalStream = null
 	cachedState = null
+	// Note: worldStateAtom uses Atom.keepAlive, so it persists across resets
+	// Tests should use Registry.make() for isolated atom instances if needed
 }

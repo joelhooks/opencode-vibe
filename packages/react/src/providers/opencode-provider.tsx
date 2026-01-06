@@ -16,10 +16,9 @@
 
 import { createContext, useContext, useCallback, useEffect, useRef, type ReactNode } from "react"
 import { useOpencodeStore } from "../store"
-import type { GlobalEvent } from "../store/types"
 import { createClient } from "@opencode-vibe/core/client"
-import { useMultiServerSSE } from "../hooks/internal/use-multi-server-sse"
-import { fetchModelLimitsWithRetry, DEFAULT_MODEL_LIMITS } from "../lib/bootstrap"
+import { fetchModelLimitsWithRetry } from "../lib/bootstrap"
+import { useWorld } from "../hooks/use-world"
 
 /**
  * Context value provided by OpenCodeProvider
@@ -56,12 +55,15 @@ export interface OpencodeProviderProps {
 const getStoreActions = () => useOpencodeStore.getState()
 
 /**
- * OpenCodeProvider - Handles SSE events, bootstrap, and sync
+ * OpenCodeProvider - Handles bootstrap and sync
  *
- * Uses useMultiServerSSE to connect to all discovered OpenCode servers
- * and routes events to the Zustand store via handleSSEEvent.
+ * ARCHITECTURE CHANGE: SSE is now handled by World Stream automatically.
+ * This provider only handles initial bootstrap (sessions, statuses, model limits).
  */
 export function OpencodeProvider({ url, directory, children }: OpencodeProviderProps) {
+	// Initialize World Stream (auto-discovers servers, connects SSE)
+	useWorld()
+
 	// getClient returns a Promise since createClient is now async
 	const getClient = useCallback(() => createClient(directory), [directory])
 
@@ -231,44 +233,8 @@ export function OpencodeProvider({ url, directory, children }: OpencodeProviderP
 		[directory, getClient],
 	)
 
-	/**
-	 * Handle incoming SSE events and route to store
-	 */
-	const handleEvent = useCallback(
-		(event: GlobalEvent) => {
-			const eventDirectory = event.directory
-			const payload = event.payload
-			const store = getStoreActions()
-
-			// Route global events
-			if (eventDirectory === "global") {
-				// Handle global.disposed -> re-bootstrap
-				if ((payload?.type as string) === "global.disposed") {
-					bootstrapRef.current()
-				}
-				return
-			}
-
-			// Handle server.instance.disposed -> re-bootstrap (same as global.disposed)
-			if ((payload?.type as string) === "server.instance.disposed") {
-				bootstrapRef.current()
-				return
-			}
-
-			// Process events for ALL directories - the store auto-initializes
-			// directory state via handleEvent's ensureDirectory logic.
-			// This enables cross-directory updates (e.g., project list showing
-			// status updates for multiple OpenCode instances on different ports).
-			store.handleEvent(eventDirectory, payload)
-		},
-		[directory],
-	)
-
-	// Subscribe to SSE events from all discovered OpenCode servers
-	// useMultiServerSSE manages connections to all servers and forwards events
-	useMultiServerSSE({
-		onEvent: handleEvent,
-	})
+	// NOTE: SSE event handling is now done by World Stream automatically
+	// No need to manually subscribe to events - useWorld() handles it
 
 	// Bootstrap on mount (once)
 	useEffect(() => {

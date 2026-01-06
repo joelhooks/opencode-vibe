@@ -38,12 +38,12 @@
 			"import": "./dist/atoms/index.js"
 		},
 		"./discovery": {
-			"types": "./dist/discovery/index.d.ts",
-			"import": "./dist/discovery/index.js"
+			"types": "./dist/world/discovery/index.d.ts",
+			"import": "./dist/world/discovery/index.js"
 		},
-		"./discovery/server": {
-			"types": "./dist/discovery/server.d.ts",
-			"import": "./dist/discovery/server.js"
+		"./world/discovery/node": {
+			"types": "./dist/world/discovery/node.d.ts",
+			"import": "./dist/world/discovery/node.js"
 		},
 		"./sse": {
 			"types": "./dist/sse/index.d.ts",
@@ -52,10 +52,6 @@
 		"./client": {
 			"types": "./dist/client/index.d.ts",
 			"import": "./dist/client/index.js"
-		},
-		"./client/server": {
-			"types": "./dist/client/client.server.d.ts",
-			"import": "./dist/client/client.server.js"
 		},
 		"./utils": {
 			"types": "./dist/utils/index.d.ts",
@@ -84,6 +80,14 @@
 		"./world/event-router": {
 			"types": "./dist/world/event-router.d.ts",
 			"import": "./dist/world/event-router.js"
+		},
+		"./world/debug": {
+			"types": "./dist/world/debug.d.ts",
+			"import": "./dist/world/debug.js"
+		},
+		"./ssr": {
+			"types": "./dist/client-ssr.d.ts",
+			"import": "./dist/client-ssr.js"
 		}
 	},
 	"files": [

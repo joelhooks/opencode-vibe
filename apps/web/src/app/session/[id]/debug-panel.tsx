@@ -1,19 +1,13 @@
 "use client"
 
-import { useEffect, useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback } from "react"
 import { useMessages, useMessagesWithParts, getOpencodeConfig, useSendMessage } from "@/app/hooks"
-import { multiServerSSE } from "@opencode-vibe/core/sse"
+import { useSSEState, useWorld } from "@opencode-vibe/react"
 import { sessions } from "@opencode-vibe/core/api"
 
 interface DebugPanelProps {
 	sessionId: string
 	isOpen: boolean
-}
-
-interface Server {
-	port: number
-	pid: number
-	directory: string
 }
 
 interface SendTestResult {
@@ -28,7 +22,6 @@ interface SendTestResult {
  */
 export function DebugPanel({ sessionId, isOpen }: DebugPanelProps) {
 	// All useState hooks first
-	const [servers, setServers] = useState<Server[]>([])
 	const [lastSend, setLastSend] = useState<{
 		url: string
 		status: string
@@ -37,33 +30,32 @@ export function DebugPanel({ sessionId, isOpen }: DebugPanelProps) {
 	const [copied, setCopied] = useState(false)
 	const [sendTestResults, setSendTestResults] = useState<SendTestResult[]>([])
 	const [isSending, setIsSending] = useState(false)
-	const [fetchError, setFetchError] = useState<string | null>(null)
 
 	// Config and store hooks
 	const { directory } = getOpencodeConfig()
 	const messagesWithParts = useMessagesWithParts(sessionId)
 	const storeMessages = useMessages(sessionId)
 
+	// World Stream hooks - replaces multiServerSSE
+	const world = useWorld()
+	const { connected, connectedCount } = useSSEState()
+
 	// useSendMessage hook - MUST be called unconditionally
 	const { sendMessage, isPending: hookIsPending, error: hookError } = useSendMessage({ sessionId })
 
 	// useMemo hooks
 	const totalParts = useMemo(() => {
-		return messagesWithParts.reduce((sum: number, msg) => sum + msg.parts.length, 0)
+		return messagesWithParts.reduce((sum: number, msg: any) => sum + msg.parts.length, 0)
 	}, [messagesWithParts])
 
-	// Check if discovery is complete before calling discovery methods
-	const discoveryComplete = multiServerSSE.isDiscoveryComplete()
+	// Get routing URLs from World Stream
+	// Session-based: lookup instance that owns this session
+	const sessionInstance = world.sessionToInstance.get(sessionId)
+	const sessionUrl = sessionInstance?.baseUrl
 
-	// These are just function calls, not hooks - safe to call if discovery complete
-	const multiServerUrl = discoveryComplete
-		? multiServerSSE.getBaseUrlForDirectory(directory)
-		: undefined
-	const sessionUrl = discoveryComplete
-		? multiServerSSE.getBaseUrlForSession(sessionId, directory)
-		: undefined
-	const sseConnected = multiServerSSE.isConnected()
-	const sseStatus = multiServerSSE.getConnectionStatus()
+	// Directory-based: lookup first instance for directory
+	const directoryInstances = world.instancesByDirectory.get(directory)
+	const multiServerUrl = directoryInstances?.[0]?.baseUrl
 
 	// All useCallback hooks - must be before any conditional returns
 	const testSendViaHook = useCallback(async () => {
@@ -140,10 +132,23 @@ export function DebugPanel({ sessionId, isOpen }: DebugPanelProps) {
 		setIsSending(true)
 		const startTime = Date.now()
 
-		// Get fresh URL at call time
-		const targetUrl =
-			(discoveryComplete ? multiServerSSE.getBaseUrlForDirectory(directory) : undefined) ||
-			`/api/opencode/4056`
+		// Get fresh URL from World Stream
+		const dirInstances = world.instancesByDirectory.get(directory)
+		const targetUrl = dirInstances?.[0]?.baseUrl
+		if (!targetUrl) {
+			console.error("[DebugPanel] No server URL available for directory:", directory)
+			setSendTestResults((prev) => [
+				...prev,
+				{
+					success: false,
+					method: "raw fetch",
+					error: "No server discovered for directory",
+					timestamp: Date.now() - startTime,
+				},
+			])
+			setIsSending(false)
+			return
+		}
 		console.log("[DebugPanel] Target URL:", targetUrl)
 
 		try {
@@ -195,23 +200,19 @@ export function DebugPanel({ sessionId, isOpen }: DebugPanelProps) {
 		} finally {
 			setIsSending(false)
 		}
-	}, [sessionId, directory])
+	}, [sessionId, directory, world])
 
 	const copyDebugInfo = useCallback(async () => {
+		const dirInstances = world.instancesByDirectory.get(directory)
 		const debugInfo = {
 			directory,
 			sessionId,
 			routing: {
-				multiServerSSE:
-					(discoveryComplete ? multiServerSSE.getBaseUrlForDirectory(directory) : undefined) ||
-					"undefined",
-				sessionBased:
-					(discoveryComplete
-						? multiServerSSE.getBaseUrlForSession(sessionId, directory)
-						: undefined) || "undefined",
+				multiServerSSE: dirInstances?.[0]?.baseUrl || "undefined",
+				sessionBased: sessionUrl || "undefined",
 			},
-			sseConnected: multiServerSSE.isConnected(),
-			sseConnectionCount: multiServerSSE.getConnectionStatus().size,
+			sseConnected: connected,
+			sseConnectionCount: connectedCount,
 			storeMessages: storeMessages.length,
 			messagesWithParts: messagesWithParts.length,
 			partsInStore: totalParts,
@@ -219,15 +220,31 @@ export function DebugPanel({ sessionId, isOpen }: DebugPanelProps) {
 		await navigator.clipboard.writeText(JSON.stringify(debugInfo, null, 2))
 		setCopied(true)
 		setTimeout(() => setCopied(false), 2000)
-	}, [directory, sessionId, storeMessages.length, messagesWithParts.length, totalParts])
+	}, [
+		directory,
+		sessionId,
+		sessionUrl,
+		connected,
+		connectedCount,
+		storeMessages.length,
+		messagesWithParts.length,
+		totalParts,
+		world.instancesByDirectory,
+	])
 
 	const testRoute = useCallback(async () => {
-		const matchingServer = servers.find((s) => s.directory === directory)
-		// Use discovery-based routing if available, fall back to multiServerSSE
-		const targetUrl = matchingServer
-			? `http://127.0.0.1:${matchingServer.port}`
-			: (discoveryComplete ? multiServerSSE.getBaseUrlForDirectory(directory) : undefined) ||
-				`/api/opencode/4056`
+		// Use discovery-based routing from World Stream
+		const dirInstances = world.instancesByDirectory.get(directory)
+		const targetUrl = dirInstances?.[0]?.baseUrl
+
+		if (!targetUrl) {
+			setLastSend({
+				url: "N/A",
+				status: "ERROR: No server discovered for directory",
+				time: Date.now(),
+			})
+			return
+		}
 
 		try {
 			const res = await fetch(`${targetUrl}/session/${sessionId}`, {
@@ -245,32 +262,12 @@ export function DebugPanel({ sessionId, isOpen }: DebugPanelProps) {
 				time: Date.now(),
 			})
 		}
-	}, [servers, directory, sessionId])
+	}, [directory, sessionId, world.instancesByDirectory])
 
-	// useEffect hooks
-	useEffect(() => {
-		if (!isOpen) return
-
-		const fetchServers = async () => {
-			try {
-				const res = await fetch("/api/opencode/servers")
-				if (!res.ok) {
-					setFetchError(`HTTP ${res.status}`)
-					setServers([])
-					return
-				}
-				const data = await res.json()
-				setFetchError(null)
-				setServers(data)
-			} catch (err) {
-				setFetchError(err instanceof Error ? err.message : "Unknown error")
-				setServers([])
-			}
-		}
-		fetchServers()
-		const interval = setInterval(fetchServers, 5000)
-		return () => clearInterval(interval)
-	}, [isOpen])
+	// Get servers from World Stream instead of deleted /api/opencode/servers
+	// The /api/opencode/servers route was removed when browser discovery was consolidated into World Stream
+	// See: packages/core/src/world/discovery/ for the new discovery architecture
+	const allInstances = Array.from(world.instances.values())
 
 	// Early return AFTER all hooks
 	if (!isOpen) return null
@@ -317,7 +314,7 @@ export function DebugPanel({ sessionId, isOpen }: DebugPanelProps) {
 						<span
 							className={`ml-2 ${sessionUrl || multiServerUrl ? "text-green-300 font-bold" : "text-red-400"}`}
 						>
-							{sessionUrl || multiServerUrl || "/api/opencode/4056 (fallback)"}
+							{sessionUrl || multiServerUrl || "NO SERVER (error)"}
 						</span>
 					</div>
 				</div>
@@ -339,14 +336,18 @@ export function DebugPanel({ sessionId, isOpen }: DebugPanelProps) {
 			</div>
 
 			<div className="mb-2">
-				<span className="text-yellow-400">Servers:</span> {servers.length}
-				{fetchError && <div className="ml-2 text-red-400">Error: {fetchError}</div>}
-				{servers.map((s) => (
-					<div key={s.port} className="ml-2 text-gray-400">
-						<span className={s.directory === directory ? "text-green-400" : ""}>
-							:{s.port} → {s.directory.split("/").pop()}
+				<span className="text-yellow-400">Servers:</span> {allInstances.length}
+				{allInstances.length === 0 && (
+					<div className="ml-2 text-yellow-400">
+						No servers discovered (World Stream not connected)
+					</div>
+				)}
+				{allInstances.map((instance) => (
+					<div key={instance.baseUrl} className="ml-2 text-gray-400">
+						<span className={instance.directory === directory ? "text-green-400" : ""}>
+							{instance.baseUrl} → {instance.directory.split("/").pop()}
 						</span>
-						{s.directory === directory && " ✓"}
+						{instance.directory === directory && " ✓"}
 					</div>
 				))}
 			</div>
@@ -396,8 +397,8 @@ export function DebugPanel({ sessionId, isOpen }: DebugPanelProps) {
 
 				{sendTestResults.length > 0 && (
 					<div className="mt-2 space-y-1">
-						{sendTestResults.slice(-3).map((result, i) => (
-							<div key={i} className="text-[10px]">
+						{sendTestResults.slice(-3).map((result) => (
+							<div key={`${result.method}-${result.timestamp}`} className="text-[10px]">
 								<span className={result.success ? "text-green-400" : "text-red-400"}>
 									{result.success ? "✓" : "✗"} {result.method}
 								</span>
@@ -409,16 +410,16 @@ export function DebugPanel({ sessionId, isOpen }: DebugPanelProps) {
 				)}
 			</div>
 
-			{/* MultiServerSSE State */}
+			{/* World Stream SSE State */}
 			<div className="p-2 bg-green-900/50 rounded border border-green-500/50">
 				<span className="text-green-300 font-bold">SSE STATE:</span>
 				<div className="mt-1 space-y-1 text-[10px]">
 					<div>
 						<span className="text-gray-400">Connected:</span>{" "}
-						<span className={sseConnected ? "text-green-400" : "text-red-400"}>
-							{sseConnected ? "yes" : "no"}
+						<span className={connected ? "text-green-400" : "text-red-400"}>
+							{connected ? "yes" : "no"}
 						</span>
-						<span className="text-gray-500 ml-2">({sseStatus.size} connections)</span>
+						<span className="text-gray-500 ml-2">({connectedCount} connections)</span>
 					</div>
 				</div>
 			</div>

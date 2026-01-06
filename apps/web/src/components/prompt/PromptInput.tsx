@@ -101,7 +101,7 @@ export function PromptInput({
 		} else if (autocomplete.type === "command") {
 			const commands = getSlashCommands()
 			// Filter by query
-			const filtered = commands.filter((cmd) => cmd.trigger?.startsWith(autocomplete.query))
+			const filtered = commands.filter((cmd: any) => cmd.trigger?.startsWith(autocomplete.query))
 			// Cast to app's SlashCommand type (structurally identical)
 			setAutocompleteItems(filtered as SlashCommand[])
 		}

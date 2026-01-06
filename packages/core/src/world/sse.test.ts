@@ -878,4 +878,37 @@ describe("WorldSSE - Discovery to Registry Wiring", () => {
 		expect(projects.size).toBe(1)
 		expect(projects.get("/test/project1")).toBeDefined()
 	})
+
+	it("cleans up stale session→port mappings when server disconnects", async () => {
+		// GIVEN: A registry with session→port mappings for multiple servers
+		const sessionToPortMap = new Map<string, number>()
+		sessionToPortMap.set("session-123", 4056) // Maps to port 4056
+		sessionToPortMap.set("session-456", 4056) // Also maps to port 4056
+		sessionToPortMap.set("session-789", 5000) // Maps to different port
+		registry.set(sessionToInstancePortAtom, sessionToPortMap)
+
+		// Verify initial state
+		const initialMapping = registry.get(sessionToInstancePortAtom)
+		expect(initialMapping.size).toBe(3)
+		expect(initialMapping.get("session-123")).toBe(4056)
+		expect(initialMapping.get("session-456")).toBe(4056)
+		expect(initialMapping.get("session-789")).toBe(5000)
+
+		// WHEN: Server on port 4056 disconnects
+		const sse = new WorldSSE(registry, { serverUrl: "http://localhost:4056" })
+		sse.start()
+		await new Promise((resolve) => setTimeout(resolve, 50))
+
+		// Manually trigger disconnectFromServer (simulating discovery detecting dead server)
+		;(sse as any).disconnectFromServer(4056)
+
+		// THEN: Session→port mappings for port 4056 should be removed
+		const updatedMapping = registry.get(sessionToInstancePortAtom)
+		expect(updatedMapping.size).toBe(1) // Only session-789 remains
+		expect(updatedMapping.has("session-123")).toBe(false)
+		expect(updatedMapping.has("session-456")).toBe(false)
+		expect(updatedMapping.get("session-789")).toBe(5000) // Other port unaffected
+
+		sse.stop()
+	})
 })

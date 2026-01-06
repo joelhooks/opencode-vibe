@@ -19,8 +19,8 @@ import {
 	getServerForDirectory,
 	getServerForSession,
 	type ServerInfo,
-} from "./discovery/index.js"
-import { DiscoveryNodeLive } from "./discovery/server.js"
+} from "./world/discovery/index.js"
+import { DiscoveryNodeLive } from "./world/discovery/node.js"
 import { OPENCODE_URL } from "./client/client.js"
 
 export type { OpencodeClient }
@@ -74,13 +74,16 @@ export async function createClientSSR(
 	}))
 
 	// Route using same logic as client-side createClient
-	let serverUrl: string
+	let serverUrl: string | null = null
 
 	if (sessionId && directory) {
 		serverUrl = getServerForSession(sessionId, directory, serverInfos)
 	} else if (directory) {
 		serverUrl = getServerForDirectory(directory, serverInfos)
-	} else {
+	}
+
+	// Fallback to first server or default if no routing match
+	if (!serverUrl) {
 		serverUrl = serverInfos[0]?.url ?? OPENCODE_URL
 	}
 

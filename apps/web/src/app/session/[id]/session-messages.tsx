@@ -3,7 +3,7 @@
 import { Fragment, useMemo, memo, useEffect } from "react"
 import type { UIMessage, ChatStatus } from "ai"
 import { useMessagesWithParts, useSessionStatus } from "@/app/hooks"
-import { useOpencodeStore } from "@opencode-vibe/react/store"
+import { useOpencodeStore } from "@opencode-vibe/react"
 import {
 	transformMessages,
 	type ExtendedUIMessage,
@@ -283,10 +283,10 @@ export function SessionMessages({
 	initialStoreParts,
 	status: externalStatus,
 }: SessionMessagesProps) {
-	// Hydrate store with initial server data (runs once on mount)
+	// Hydrate store with server-provided messages on mount
 	useEffect(() => {
 		if (!directory) return
-		if (initialStoreMessages.length === 0) return
+		if (!initialStoreMessages || initialStoreMessages.length === 0) return
 
 		// Hydrate messages and parts into store
 		useOpencodeStore
@@ -294,15 +294,15 @@ export function SessionMessages({
 			.hydrateMessages(directory, sessionId, initialStoreMessages, initialStoreParts)
 	}, [directory, sessionId, initialStoreMessages, initialStoreParts])
 
-	// Get messages with parts from store
+	// Get messages with parts from World Stream (reactive)
 	const storeMessages = useMessagesWithParts(sessionId)
 
-	// Get session status from store
+	// Get session status from World Stream (reactive)
 	const sessionStatus = useSessionStatus(sessionId)
 	const running = sessionStatus === "running"
 
-	// Transform store messages to UIMessage format (with extended metadata)
-	// Since we're hydrated, storeMessages always has data on first render
+	// Transform World Stream messages to UIMessage format (with extended metadata)
+	// Use initialMessages for zero-flicker until World Stream connects and populates
 	const messages = useMemo(() => {
 		if (storeMessages.length === 0) return initialMessages as ExtendedUIMessage[]
 		return transformMessages(storeMessages as unknown as OpencodeMessage[]) as ExtendedUIMessage[]

@@ -27,10 +27,15 @@ import {
 	partsAtom,
 	statusAtom,
 	worldStateAtom,
+	instancesAtom,
+	connectionStatusAtom,
+	projectsAtom,
 } from "./atoms.js"
 import { WorldSSE } from "./sse.js"
 import type { Message, Part, Session } from "../types/domain.js"
 import type { SessionStatus } from "../types/events.js"
+import type { Layer } from "effect"
+import type { Discovery } from "./discovery/index.js"
 
 /**
  * Extended config for merged streams
@@ -52,6 +57,14 @@ export interface MergedStreamConfig extends WorldStreamConfig {
 	 * Note: If both sse and registry are provided, sse should already be using this registry
 	 */
 	registry?: ReturnType<typeof Registry.make>
+	/**
+	 * Discovery Layer (default: empty implementation that returns [])
+	 *
+	 * Inject custom Discovery implementation for testing or Node.js environments.
+	 * Node.js: DiscoveryNodeLive from @opencode-vibe/core/world/discovery/node (lsof process scanning)
+	 * Testing: Use Layer.succeed(Discovery, { discover: () => Effect.succeed([...]) })
+	 */
+	discoveryLayer?: Layer.Layer<Discovery>
 }
 
 /**
@@ -201,6 +214,8 @@ export function createMergedWorldStream(config: MergedStreamConfig = {}): Merged
 		sources = [],
 		sse: injectedSSE,
 		registry: injectedRegistry,
+		discoveryLayer,
+		initialInstances,
 	} = config
 
 	// Use injected registry (for testing) or create a new one
@@ -211,6 +226,13 @@ export function createMergedWorldStream(config: MergedStreamConfig = {}): Merged
 	// Without mount, Registry.subscribe won't fire when dependent atoms (statusAtom, etc.) change
 	const cleanupMount = registry.mount(worldStateAtom)
 
+	// CRITICAL FIX: Populate instancesAtom from initialInstances (SSR discovery)
+	// This bypasses client-side discovery and enables immediate SSE connections
+	if (initialInstances && initialInstances.length > 0) {
+		const instanceMap = new Map(initialInstances.map((i) => [i.port, i]))
+		registry.set(instancesAtom, instanceMap)
+	}
+
 	// Use injected SSE instance (for testing) or create a new one
 	const sse =
 		injectedSSE ||
@@ -218,6 +240,8 @@ export function createMergedWorldStream(config: MergedStreamConfig = {}): Merged
 			serverUrl: baseUrl, // undefined = use discovery loop for all servers
 			autoReconnect,
 			onEvent,
+			discoveryLayer,
+			initialInstances, // Pass to WorldSSE for immediate connections
 		})
 
 	// Only start if we created it (injected SSE is controlled by test)
@@ -271,13 +295,42 @@ export function createMergedWorldStream(config: MergedStreamConfig = {}): Merged
 	 *
 	 * Pattern: BehaviorSubject-like - fires immediately with current state,
 	 * then on each change (like React useState).
+	 *
+	 * CRITICAL FIX: Subscribe to leaf atoms instead of derived worldStateAtom.
+	 * Registry.subscribe on derived atoms doesn't fire when dependencies change.
+	 * We must subscribe to each leaf atom and manually trigger callback with derived state.
 	 */
 	function subscribe(callback: (state: WorldState) => void): () => void {
-		// Fire immediately with current state (Registry.subscribe doesn't do this)
+		// Fire immediately with current state
 		callback(registry.get(worldStateAtom))
 
-		// Then subscribe to future changes
-		return registry.subscribe(worldStateAtom, callback)
+		// Subscribe to ALL leaf atoms that worldStateAtom depends on
+		// When any leaf atom changes, re-compute worldStateAtom and fire callback
+		const unsubscribes = [
+			registry.subscribe(sessionsAtom, () => {
+				callback(registry.get(worldStateAtom))
+			}),
+			registry.subscribe(messagesAtom, () => {
+				callback(registry.get(worldStateAtom))
+			}),
+			registry.subscribe(partsAtom, () => {
+				callback(registry.get(worldStateAtom))
+			}),
+			registry.subscribe(statusAtom, () => {
+				callback(registry.get(worldStateAtom))
+			}),
+			registry.subscribe(connectionStatusAtom, () => {
+				callback(registry.get(worldStateAtom))
+			}),
+			registry.subscribe(instancesAtom, () => {
+				callback(registry.get(worldStateAtom))
+			}),
+			registry.subscribe(projectsAtom, () => {
+				callback(registry.get(worldStateAtom))
+			}),
+		]
+
+		return () => unsubscribes.forEach((unsub) => unsub())
 	}
 
 	/**

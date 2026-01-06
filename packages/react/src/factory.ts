@@ -28,9 +28,8 @@ import { useSubagent as useSubagentBase } from "./hooks/internal/use-subagent"
 import type { UseSubagentOptions, UseSubagentReturn } from "./hooks/internal/use-subagent"
 import { useProvider as useProviderBase } from "./hooks/internal/use-provider"
 import type { UseProviderResult } from "./hooks/internal/use-provider"
-import { useServers as useServersBase } from "./hooks/use-servers"
-import type { UseServersReturn } from "./hooks/use-servers"
-import { multiServerSSE } from "@opencode-vibe/core/sse"
+// REMOVED: use-servers.ts and multiServerSSE deleted in World Stream migration
+// Server discovery now handled internally by World Stream (ADR-018)
 import type { Prompt } from "./types/prompt"
 import { providers, projects, sessions, prompt } from "@opencode-vibe/core/api"
 import type { Provider, Project } from "@opencode-vibe/core/atoms"
@@ -46,6 +45,78 @@ import {
 	type UseMultiDirectoryStatusReturn,
 } from "./hooks/use-multi-directory-status"
 import { getContextUsage, getCompactionState } from "./lib/delegation-helpers"
+import { useWorld } from "./hooks/use-world"
+import type { Instance, WorldState } from "@opencode-vibe/core/world/types"
+
+/**
+ * Return type for generateOpencodeHelpers
+ *
+ * Explicit type annotation required to avoid TS2742 error about
+ * inferred types referencing internal Core schema paths.
+ */
+export interface OpencodeHelpers {
+	useSession: (sessionId: string) => Session | undefined
+	useMessages: (sessionId: string) => any[]
+	useMessagesWithParts: (sessionId: string) => Array<{ info: any; parts: any[] }>
+	useSendMessage: (options: { sessionId: string }) => {
+		sendMessage: (parts: Prompt) => Promise<void>
+		isPending: boolean
+		error: Error | undefined
+		queueLength: number
+	}
+	useSessionList: () => Session[]
+	useProviders: () => {
+		providers: Provider[]
+		loading: boolean
+		error: Error | null
+		refetch: () => void
+	}
+	useProvider: () => UseProviderResult
+	useProjects: () => {
+		projects: Project[]
+		loading: boolean
+		error: Error | null
+		refetch: () => void
+	}
+	useCommands: () => ReturnType<typeof useCommandsBase>
+	useCreateSession: () => {
+		createSession: (title?: string) => Promise<any>
+		isCreating: boolean
+		error: Error | null
+	}
+	useFileSearch: (
+		query: string,
+		options?: { debounceMs?: number },
+	) => {
+		files: string[]
+		isLoading: boolean
+		error: Error | null
+	}
+	useSSE: (options?: Partial<UseSSEOptions>) => UseSSEReturn
+	useSSEEvents: () => void
+	useSSESync: () => void
+	useConnectionStatus: () => {
+		connected: boolean
+		serverCount: number
+		discovering: boolean
+	}
+	useSessionStatus: (sessionId: string, options?: DeriveSessionStatusOptions) => SessionStatus
+	useCompactionState: (sessionId: string) => CompactionState
+	useContextUsage: (sessionId: string) => ContextUsage
+	useLiveTime: (interval?: number) => number
+	useSubagent: (options: UseSubagentOptions) => UseSubagentReturn
+	useServersEffect: () => {
+		servers: Instance[]
+		loading: boolean
+		error: null
+		refetch: () => void
+	}
+	useMultiDirectorySessions: (directories: string[]) => Record<string, SessionDisplay[]>
+	useMultiDirectoryStatus: (
+		directories: string[],
+		initialSessions?: Record<string, Array<{ id: string; formattedTime: string }>>,
+	) => UseMultiDirectoryStatusReturn
+}
 
 /**
  * Global config type augmentation
@@ -115,7 +186,7 @@ export function getOpencodeConfig(fallback?: OpencodeConfig): OpencodeConfig {
  * const session = useSession("session-123")
  * ```
  */
-export function generateOpencodeHelpers<TRouter = any>(config?: OpencodeConfig) {
+export function generateOpencodeHelpers<TRouter = any>(config?: OpencodeConfig): OpencodeHelpers {
 	/**
 	 * Hook for accessing session data with real-time SSE updates
 	 *
@@ -718,15 +789,16 @@ export function generateOpencodeHelpers<TRouter = any>(config?: OpencodeConfig) 
 		sessionId: string,
 		options?: DeriveSessionStatusOptions,
 	): SessionStatus {
-		const cfg = getOpencodeConfig(config)
-		return useOpencodeStore(
-			useCallback(
-				(state) => {
-					return deriveSessionStatus(state, sessionId, cfg.directory, options)
-				},
-				[sessionId, cfg.directory, options],
-			),
+		const world = useWorld()
+
+		// Get session from World Stream (EnrichedSession has status already computed)
+		const session = useMemo(
+			() => world.sessions.find((s) => s.id === sessionId),
+			[world.sessions, sessionId],
 		)
+
+		// Return status from EnrichedSession, fallback to "idle"
+		return session?.status || "idle"
 	}
 
 	/**
@@ -812,23 +884,36 @@ export function generateOpencodeHelpers<TRouter = any>(config?: OpencodeConfig) 
 	}
 
 	/**
-	 * Hook for server discovery (Effect-based)
+	 * Hook for server discovery
 	 *
-	 * @returns Servers, loading state, error, refetch
+	 * DEPRECATED: Server discovery now handled internally by World Stream (ADR-018).
+	 * Use useWorld().instances instead for server information.
+	 *
+	 * @returns Servers from World Stream instances
 	 *
 	 * @example
 	 * ```tsx
-	 * const { servers, loading } = useServersEffect()
+	 * const world = useWorld()
+	 * const servers = world.instances
 	 * ```
 	 */
-	function useServersEffect(): UseServersReturn {
-		return useServersBase()
+	function useServersEffect() {
+		const world = useWorld()
+		return {
+			servers: world.instances,
+			loading: world.connectionStatus === "connecting",
+			error: null,
+			refetch: () => {
+				// No-op: World Stream handles reconnection automatically
+			},
+		}
 	}
 
 	/**
-	 * Hook to get SSE connection status from multiServerSSE
+	 * Hook to get SSE connection status from World Stream
 	 *
 	 * SSR-safe: Returns default state during server render, hydrates with actual state on client.
+	 * Derives connection status from World Stream's connectionStatus and instances.
 	 *
 	 * @returns Connection status with connected state, server count, and discovery state
 	 *
@@ -845,145 +930,49 @@ export function generateOpencodeHelpers<TRouter = any>(config?: OpencodeConfig) 
 		serverCount: number
 		discovering: boolean
 	} {
-		// SSR-safe initial state
-		const [state, setState] = useState(() => {
-			// During SSR, return safe defaults
-			if (typeof window === "undefined") {
-				return {
-					connected: false,
-					serverCount: 0,
-					discovering: true,
-				}
-			}
-			// On client, get initial state immediately
-			const sseState = multiServerSSE.getCurrentState()
-			return {
-				connected: sseState.connected,
-				serverCount: sseState.servers.length,
-				discovering: sseState.discovering,
-			}
-		})
+		const world = useWorld()
 
-		useEffect(() => {
-			// Subscribe to state changes via observable pattern (no polling needed)
-			const unsubscribe = multiServerSSE.onStateChange((sseState) => {
-				setState({
-					connected: sseState.connected,
-					serverCount: sseState.servers.length,
-					discovering: sseState.discovering,
-				})
-			})
-
-			return unsubscribe
-		}, [])
-
-		return state
+		// Derive connection status from World Stream state
+		return useMemo(
+			() => ({
+				connected: world.connectionStatus === "connected",
+				serverCount: world.connectedInstanceCount,
+				discovering: world.connectionStatus === "connecting",
+			}),
+			[world.connectionStatus, world.connectedInstanceCount],
+		)
 	}
 
 	/**
 	 * Hook to start SSE and route events to the Zustand store
 	 *
-	 * **This is the critical hook that wires up real-time updates.**
-	 * Call this once at the top level (e.g., in OpencodeProvider or root layout).
+	 * DEPRECATED: SSE connection management now handled internally by World Stream (ADR-018).
+	 * World Stream auto-initializes on first useWorld() call and manages SSE connections.
 	 *
-	 * **What it does**:
-	 * 1. Starts multiServerSSE singleton (idempotent - safe to call multiple times)
-	 * 2. Subscribes to ALL SSE events (not filtered by directory)
-	 * 3. Routes events to `store.handleSSEEvent()` which auto-initializes directories
+	 * This hook is now a no-op for backwards compatibility. Components that previously
+	 * called useSSEEvents() will continue to work - they just don't need to anymore.
 	 *
-	 * **CRITICAL**: This hook processes events for **ALL directories**, not just the current one.
-	 * This enables cross-directory features like the project list showing status updates
-	 * for multiple OpenCode instances running on different ports.
-	 *
-	 * **Data flow**:
-	 * ```
-	 * multiServerSSE.start() → discovers backend servers on ports 4056-4066
-	 *   → connects to /sse endpoints
-	 *   → onEvent callback fires for each SSE event
-	 *   → store.handleSSEEvent(event) auto-creates directory if needed
-	 *   → store.handleEvent(directory, payload) routes to specific handler
-	 *   → store updates → components re-render via selectors
-	 * ```
-	 *
-	 * **Why not filter by directory?**
-	 * The store's `handleSSEEvent` auto-creates directory state, so events for
-	 * any directory are safe to process. This allows the UI to react to changes
-	 * in other projects (e.g., showing when a background session starts running).
-	 *
-	 * @example Top-level usage
+	 * @example Migration
 	 * ```tsx
+	 * // Before (no longer needed)
 	 * function OpencodeProvider({ children }) {
-	 *   useSSEEvents() // Start SSE once at top level
+	 *   useSSEEvents() // Can be removed
 	 *   return <>{children}</>
 	 * }
 	 *
+	 * // After - World Stream handles everything
 	 * function SessionPage({ sessionId }) {
-	 *   // No need to call useSSEEvents here - already running
-	 *   const messages = useMessages(sessionId) // Updates in real-time
-	 *   return <MessageList messages={messages} />
+	 *   const world = useWorld() // SSE starts automatically
+	 *   return <MessageList messages={world.sessions.find(s => s.id === sessionId)?.messages} />
 	 * }
 	 * ```
 	 *
-	 * @example Cross-directory updates
-	 * ```tsx
-	 * function ProjectList() {
-	 *   useSSEEvents() // Processes events for all projects
-	 *   const projects = useProjects()
-	 *   return projects.map(p => {
-	 *     // Status updates work even if project is on different port
-	 *     const status = useSessionStatus(p.latestSession.id)
-	 *     return <ProjectCard status={status} />
-	 *   })
-	 * }
-	 * ```
+	 * @deprecated Use useWorld() instead - SSE is managed internally by World Stream
 	 */
 	function useSSEEvents(): void {
-		const cfg = getOpencodeConfig(config)
-
-		// Start MultiServerSSE singleton (idempotent)
-		useEffect(() => {
-			console.log("[useSSEEvents] Starting multiServerSSE")
-			multiServerSSE.start()
-		}, [])
-
-		/**
-		 * Subscribe to events and route to store
-		 *
-		 * **Key behavior**: Subscribes to ALL events from multiServerSSE, not filtered by directory.
-		 * The store's handleSSEEvent will auto-create directory state if needed, so this is safe.
-		 *
-		 * **Why getState()?** Using `useOpencodeStore.getState()` instead of the hook return value
-		 * prevents the dependency array from causing re-subscriptions on every store update.
-		 * The hook return value creates a new reference on every render (Zustand gotcha).
-		 */
-		useEffect(() => {
-			console.log("[useSSEEvents] Subscribing to SSE events (all directories)")
-
-			const unsubscribe = multiServerSSE.onEvent((event) => {
-				/**
-				 * Process events for ALL directories
-				 *
-				 * The store auto-initializes directory state via handleSSEEvent's
-				 * ensureDirectory logic. This enables cross-directory updates
-				 * (e.g., project list showing status updates for multiple OpenCode
-				 * instances on different ports).
-				 */
-				console.log("[useSSEEvents] Received event for", event.directory, ":", event.payload.type)
-
-				// Route to store (getState() for stable reference)
-				// Type cast: SSE event payload is SDK Event at runtime, but typed as generic object
-				useOpencodeStore.getState().handleSSEEvent({
-					directory: event.directory,
-					// @ts-expect-error - SSE event payload has correct shape but generic type
-					payload: event.payload,
-				})
-			})
-
-			return () => {
-				console.log("[useSSEEvents] Unsubscribing from SSE events")
-				unsubscribe()
-			}
-		}, [])
+		// No-op: World Stream handles SSE connections internally
+		// Kept for backwards compatibility with existing code
+		console.log("[useSSEEvents] DEPRECATED: SSE now managed by World Stream. This hook is a no-op.")
 	}
 
 	/**
@@ -1023,45 +1012,23 @@ export function generateOpencodeHelpers<TRouter = any>(config?: OpencodeConfig) 
 	 * ```
 	 */
 	function useMessagesWithParts(sessionId: string) {
-		const cfg = getOpencodeConfig(config)
+		const world = useWorld()
 
-		// Select raw data from store - these are stable references from Immer
-		const messages = useOpencodeStore(
-			useCallback(
-				(state) => {
-					const dir = state.directories[cfg.directory]
-					if (!dir) return undefined
-					return dir.messages[sessionId]
-				},
-				[sessionId, cfg.directory],
-			),
-		)
-		const partsMap = useOpencodeStore(
-			useCallback(
-				(state) => {
-					const dir = state.directories[cfg.directory]
-					if (!dir) return undefined
-					return dir.parts
-				},
-				[cfg.directory],
-			),
+		// Get session from World Stream (EnrichedSession has messages with parts already joined)
+		const session = useMemo(
+			() => world.sessions.find((s) => s.id === sessionId),
+			[world.sessions, sessionId],
 		)
 
-		useEffect(() => {
-			if (!cfg.directory) return
-			useOpencodeStore.getState().initDirectory(cfg.directory)
-		}, [cfg.directory])
-
-		// Derive the combined structure with useMemo to avoid infinite loops
-		// Only recomputes when messages or partsMap references change
+		// Return enriched messages in format expected by consumers: { info: Message, parts: Part[] }
 		return useMemo(() => {
-			if (!messages) return []
+			if (!session?.messages) return []
 
-			return messages.map((message) => ({
-				info: message,
-				parts: partsMap?.[message.id] ?? [],
+			return session.messages.map((msg) => ({
+				info: msg, // EnrichedMessage extends Message
+				parts: msg.parts, // Parts already included in EnrichedMessage
 			}))
-		}, [messages, partsMap])
+		}, [session?.messages])
 	}
 
 	/**

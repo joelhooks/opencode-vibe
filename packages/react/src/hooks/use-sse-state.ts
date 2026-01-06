@@ -1,21 +1,21 @@
 /**
- * useSSEState - React hook for observable SSE state
+ * useSSEState - React hook for World Stream connection state
  *
- * Subscribes to MultiServerSSE state changes without polling.
- * Replaces setInterval-based polling in sse-debug-panel.
+ * Subscribes to World Stream for SSE connection status.
+ * Replaces multiServerSSE dependency with World Stream.
  *
  * @example
  * ```tsx
  * function SSEDebugPanel() {
- *   const { servers, discovering, connected } = useSSEState()
+ *   const { instances, discovering, connected, connectedCount } = useSSEState()
  *
  *   return (
  *     <div>
  *       {discovering && <Badge>Discovering...</Badge>}
  *       <p>Connected: {connected ? 'Yes' : 'No'}</p>
  *       <ul>
- *         {servers.map(s => (
- *           <li key={s.port}>Port {s.port}: {s.state}</li>
+ *         {instances.map(i => (
+ *           <li key={i.port}>Port {i.port}: {i.status}</li>
  *         ))}
  *       </ul>
  *     </div>
@@ -24,38 +24,42 @@
  * ```
  */
 
-import { useState, useEffect } from "react"
-import { multiServerSSE, type SSEState } from "@opencode-vibe/core/sse"
+"use client"
+
+import { useMemo } from "react"
+import { useWorld } from "./use-world"
+
+export interface SSEState {
+	/** Discovered instances */
+	instances: Array<{ port: number; status: string; directory: string }>
+	/** True if discovery is in progress */
+	discovering: boolean
+	/** True if at least one instance is connected */
+	connected: boolean
+	/** Number of connected instances */
+	connectedCount: number
+}
 
 /**
- * Subscribe to SSE state changes (observable pattern)
+ * Subscribe to World Stream connection state
  * Returns current state and updates reactively on state changes.
  *
  * SSR-safe: Returns empty state on server, subscribes on client.
  */
 export function useSSEState(): SSEState {
-	const [state, setState] = useState<SSEState>(() => {
-		// SSR safety: return empty state on server
-		if (typeof window === "undefined") {
-			return {
-				servers: [],
-				connections: [],
-				discovering: false,
-				connected: false,
-			}
-		}
+	const world = useWorld()
 
-		// Client: get current state immediately
-		return multiServerSSE.getCurrentState()
-	})
-
-	useEffect(() => {
-		// Subscribe to state changes
-		const unsubscribe = multiServerSSE.onStateChange(setState)
-
-		// Cleanup subscription on unmount
-		return unsubscribe
-	}, [])
-
-	return state
+	return useMemo(
+		() => ({
+			instances: world.instances.map((i) => ({
+				port: i.port,
+				status: i.status,
+				directory: i.directory,
+			})),
+			discovering: world.connectionStatus === "connecting",
+			connected: world.connectionStatus === "connected",
+			connectedCount: world.connectedInstanceCount,
+		}),
+		[world.instances, world.connectionStatus, world.connectedInstanceCount],
+	)
 }

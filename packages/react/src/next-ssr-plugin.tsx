@@ -6,16 +6,24 @@
  * Usage:
  * ```tsx
  * // app/layout.tsx or page component
- * <OpencodeSSRPlugin config={{ baseUrl: "/api/opencode/4056", directory: "/path" }} />
+ * <OpencodeSSRPlugin config={{ baseUrl: "/api/opencode", directory: "/path" }} />
  * ```
  */
 "use client"
 
 import { useServerInsertedHTML } from "next/navigation"
 
+export interface OpencodeInstance {
+	port: number
+	directory: string
+	baseUrl: string
+}
+
 export interface OpencodeConfig {
 	baseUrl: string
 	directory: string
+	/** SSR-discovered instances to initialize World Stream */
+	instances?: OpencodeInstance[]
 }
 
 export interface OpencodeSSRPluginProps {
@@ -37,6 +45,7 @@ export function OpencodeSSRPlugin({ config }: OpencodeSSRPluginProps) {
 	useServerInsertedHTML(() => {
 		return (
 			<script
+				// biome-ignore lint/security/noDangerouslySetInnerHtml: Required pattern for Next.js SSR config injection
 				dangerouslySetInnerHTML={{
 					__html: `window.__OPENCODE = ${JSON.stringify(config)};`,
 				}}

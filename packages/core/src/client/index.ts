@@ -17,7 +17,6 @@ export {
 	OPENCODE_URL,
 	createClient,
 	globalClient,
-	runWithDiscovery,
 	type RoutingContext,
 	type OpencodeClient,
 } from "./client.js"

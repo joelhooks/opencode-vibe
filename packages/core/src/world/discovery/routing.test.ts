@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type ServerInfo, getServerForDirectory, getServerForSession } from "./server-routing.js"
-
-const DEFAULT_SERVER_URL = "http://localhost:4056"
+import { type ServerInfo, getServerForDirectory, getServerForSession } from "./routing.js"
 
 describe("getServerForDirectory", () => {
 	const mockServers: ServerInfo[] = [
@@ -22,14 +20,14 @@ describe("getServerForDirectory", () => {
 		},
 	]
 
-	it("returns default when servers array is empty", () => {
+	it("returns null when servers array is empty", () => {
 		const result = getServerForDirectory("/any/directory", [])
-		expect(result).toBe(DEFAULT_SERVER_URL)
+		expect(result).toBeNull()
 	})
 
-	it("returns default when no matching directory found", () => {
+	it("returns null when no matching directory found", () => {
 		const result = getServerForDirectory("/home/user/project-c", mockServers)
-		expect(result).toBe(DEFAULT_SERVER_URL)
+		expect(result).toBeNull()
 	})
 
 	it("returns server URL for exact directory match", () => {
@@ -43,9 +41,9 @@ describe("getServerForDirectory", () => {
 		expect(result).toBe("/api/opencode/4056")
 	})
 
-	it("handles empty directory string", () => {
+	it("returns null when empty directory string", () => {
 		const result = getServerForDirectory("", mockServers)
-		expect(result).toBe(DEFAULT_SERVER_URL)
+		expect(result).toBeNull()
 	})
 
 	it("handles directory with trailing slash", () => {
@@ -68,7 +66,7 @@ describe("getServerForDirectory", () => {
 
 	it("is case-sensitive for directory matching", () => {
 		const result = getServerForDirectory("/HOME/USER/PROJECT-A", mockServers)
-		expect(result).toBe(DEFAULT_SERVER_URL)
+		expect(result).toBeNull()
 	})
 })
 
@@ -92,9 +90,9 @@ describe("getServerForSession", () => {
 		["session-456", 4057],
 	])
 
-	it("returns default when servers array is empty", () => {
+	it("returns null when servers array is empty", () => {
 		const result = getServerForSession("session-123", "/home/user/project-a", [], sessionToPort)
-		expect(result).toBe(DEFAULT_SERVER_URL)
+		expect(result).toBeNull()
 	})
 
 	it("returns server for session when found in cache", () => {
@@ -117,14 +115,14 @@ describe("getServerForSession", () => {
 		expect(result).toBe("/api/opencode/4057")
 	})
 
-	it("returns default when neither session nor directory match", () => {
+	it("returns null when neither session nor directory match", () => {
 		const result = getServerForSession(
 			"session-unknown",
 			"/home/user/project-c",
 			mockServers,
 			sessionToPort,
 		)
-		expect(result).toBe(DEFAULT_SERVER_URL)
+		expect(result).toBeNull()
 	})
 
 	it("prefers session cache over directory match", () => {
