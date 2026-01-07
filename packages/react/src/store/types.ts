@@ -5,7 +5,7 @@
  * Each directory has isolated state with sessions, messages, parts, todos, etc.
  */
 
-import type { SessionStatus, GlobalEvent } from "@opencode-vibe/core/types"
+import type { SessionStatus, GlobalEvent, Session } from "@opencode-vibe/core/types"
 
 /**
  * Todo type for session tasks
@@ -63,4 +63,4 @@ export interface DirectoryState {
 }
 
 // Re-export canonical types from core
-export type { SessionStatus, GlobalEvent }
+export type { SessionStatus, GlobalEvent, Session }

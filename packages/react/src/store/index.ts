@@ -5,7 +5,7 @@
  * Uses Immer for immutable updates and Binary search from core for O(log n) operations.
  */
 
-export { useOpencodeStore, usePartSummary } from "./store.js"
+export { useOpencodeStore } from "./store.js"
 export type { Part, Message } from "@opencode-vibe/core/types"
 export type {
 	Session,

@@ -76,7 +76,11 @@ export function OpencodeProvider({ url, directory, children }: OpencodeProviderP
 	}, [directory])
 
 	/**
-	 * Bootstrap: Load initial data (sessions + statuses + model limits)
+	 * Bootstrap: Load initial data (model limits only - sessions come from World Stream)
+	 *
+	 * MIGRATION NOTE (ADR-018 - Zustand Elimination):
+	 * Sessions, messages, and parts are now loaded by World Stream automatically.
+	 * This bootstrap only loads model limits for context usage calculation.
 	 *
 	 * Gracefully handles network failures - the app remains usable
 	 * and SSE will provide updates when connection is restored.
@@ -84,54 +88,8 @@ export function OpencodeProvider({ url, directory, children }: OpencodeProviderP
 	const bootstrap = useCallback(async () => {
 		const store = getStoreActions()
 
-		// Load sessions first (most important)
-		try {
-			const client = await getClient()
-			const sessionsResponse = await client.session.list()
-			const fourHoursAgo = Date.now() - 4 * 60 * 60 * 1000
-
-			type SessionWithArchived = any // SDK type has time.archived
-			const sessions = (sessionsResponse.data ?? ([] as SessionWithArchived[]))
-				.filter((s: SessionWithArchived) => !s.time.archived)
-				.sort((a: SessionWithArchived, b: SessionWithArchived) => a.id.localeCompare(b.id))
-				.filter((s: SessionWithArchived, i: number) => {
-					// Include first 20 sessions + any updated recently
-					if (i < 20) return true
-					return s.time.updated > fourHoursAgo
-				})
-
-			store.setSessions(directory, sessions)
-			store.setSessionReady(directory, true)
-		} catch (error) {
-			// Network error or server not running - this is expected during dev
-			// Don't spam the user, just log it
-			console.warn(
-				"[OpenCode] Failed to load sessions:",
-				error instanceof Error ? error.message : error,
-			)
-			// Still mark as ready so UI doesn't hang
-			store.setSessionReady(directory, true)
-		}
-
-		// Load session statuses separately (non-critical)
-		try {
-			const client = await getClient()
-			const statusResponse = await client.session.status()
-			if (statusResponse.data) {
-				for (const [sessionID, status] of Object.entries(statusResponse.data)) {
-					store.handleEvent(directory, {
-						type: "session.status",
-						properties: { sessionID, status },
-					})
-				}
-			}
-		} catch (error) {
-			// Status fetch failed - not critical, SSE will update statuses
-			console.warn(
-				"[OpenCode] Failed to load statuses:",
-				error instanceof Error ? error.message : error,
-			)
-		}
+		// Sessions are now loaded by World Stream - mark as ready immediately
+		store.setSessionReady(directory, true)
 
 		// Load providers to cache model limits (for context usage calculation)
 		// Uses retry with exponential backoff for resilience
@@ -176,7 +134,11 @@ export function OpencodeProvider({ url, directory, children }: OpencodeProviderP
 	bootstrapRef.current = bootstrap
 
 	/**
-	 * Sync a specific session (messages + parts + todos + diffs)
+	 * Sync a specific session (todos + diffs only - messages come from World Stream)
+	 *
+	 * MIGRATION NOTE (ADR-018 - Zustand Elimination):
+	 * Messages and parts are now loaded by World Stream automatically.
+	 * This sync only loads todos and diffs which are still in Zustand store.
 	 *
 	 * Uses Promise.allSettled to fetch all data in parallel,
 	 * gracefully handling partial failures.
@@ -188,31 +150,11 @@ export function OpencodeProvider({ url, directory, children }: OpencodeProviderP
 			// Create client first (async)
 			const client = await getClient()
 
-			// Fetch all data in parallel, handling failures individually
-			const [messagesResult, todoResult, diffResult] = await Promise.allSettled([
-				client.session.messages({
-					path: { id: sessionID },
-					query: { limit: 100 },
-				}),
+			// Fetch todos and diffs in parallel (messages handled by World Stream)
+			const [todoResult, diffResult] = await Promise.allSettled([
 				client.session.todo({ path: { id: sessionID } }),
 				client.session.diff({ path: { id: sessionID } }),
 			])
-
-			// Process messages (most important)
-			if (messagesResult.status === "fulfilled" && messagesResult.value.data) {
-				const messages = messagesResult.value.data.map((m: any) => m.info)
-				store.setMessages(directory, sessionID, messages)
-
-				// Set parts for each message
-				for (const msg of messagesResult.value.data) {
-					store.setParts(directory, msg.info.id, msg.parts as any)
-				}
-			} else if (messagesResult.status === "rejected") {
-				console.warn(
-					"[OpenCode] Failed to sync messages:",
-					messagesResult.reason?.message ?? messagesResult.reason,
-				)
-			}
 
 			// Process todos (non-critical)
 			if (todoResult.status === "fulfilled" && todoResult.value.data) {
