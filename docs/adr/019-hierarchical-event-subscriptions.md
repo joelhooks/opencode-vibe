@@ -867,152 +867,599 @@ const sessionAtomFamily = atomFamily((sessionId: string) =>
 
 ---
 
-## Migration Path
+## Migration Path (Swarm-Ready)
 
-### Phase 0: Legacy Code Cleanup (PREREQUISITE)
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    SWARM COORDINATOR GUIDE                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Each phase is an EPIC designed for a fresh coordinator context.        │
+│  Subtasks are WORKER-SIZED with explicit file boundaries.               │
+│  Dependency graphs show what can run in parallel.                       │
+│                                                                         │
+│  Phase execution order: 0a → 0b → 0c → 1 → 2 → 3 → 4 → 5               │
+│  (0b and 0c can run in parallel after 0a completes)                    │
+│                                                                         │
+│  CRITICAL: Each phase MUST pass typecheck + test suite before next.    │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
-**Scope:** Remove dead code and legacy Zustand handlers before implementing new architecture.
+---
 
-**Critical Finding:** Zustand store still has legacy session/message/part management structure, even though these are handled by effect-atom. This creates confusion and potential bugs.
+### Phase 0a: Dead Code Deletion (PREREQUISITE)
 
-**Dead Code to Remove:**
+**Epic Goal:** Remove dead code and legacy Zustand handlers before implementing new architecture.
 
-1. **WorldStore Effect.Service wrappers (atoms.ts:48+)**
-   - `WorldStore` class - replaced by effect-atom primitives
-   - `WorldStoreServiceInterface` - unused abstraction
-   - `WorldStoreService` - Effect.Service wrapper
-   - `WorldStoreServiceLive` - Layer implementation
+**Why First:** Reduces cognitive load, eliminates confusion about which code paths are active.
 
-2. **SSE Effect.Service pattern (sse.ts)**
-   - `createWorldSSE` - replaced by direct SSE connection
-   - `SSEService` - unused Effect.Service
-   - `SSEServiceLive` - Layer implementation
+**Critical Finding:** Zustand store still has legacy session/message/part management structure, even though these are handled by effect-atom.
 
-3. **Legacy Zustand handlers (packages/react/src/store/store.ts:162-177)**
-   - Delete `sessions`, `messages`, `parts` from `DirectoryState`
-   - Remove `handleEvent()` cases for session/message/part events
-   - Remove binary search operations on session/message/part arrays
-   - **KEEP ONLY:** `ready`, `todos`, `modelLimits` (UI-local state)
+#### Subtask Decomposition
 
-4. **Internal-only exports**
-   - Mark `MergedStreamHandle`, `MergedStreamConfig` as non-exported
-   - These are implementation details, not public API
+| ID | Subtask | Files | Parallel? | Depends On |
+|----|---------|-------|-----------|------------|
+| 0a.1 | Delete WorldStore class and Effect.Service wrappers | `atoms.ts` | ✅ Yes | - |
+| 0a.2 | Delete SSE Effect.Service pattern | `sse.ts` | ✅ Yes | - |
+| 0a.3 | Remove sessions/messages/parts from Zustand store | `store.ts` | ✅ Yes | - |
+| 0a.4 | Update/delete affected tests | `*.test.ts` | ⚠️ After 1-3 | 0a.1, 0a.2, 0a.3 |
 
-**Checklist:**
+#### Dependency Graph
 
-- [ ] Delete WorldStore class and Effect.Service wrappers (atoms.ts)
-- [ ] Delete SSE Effect.Service pattern (sse.ts)
-- [ ] Remove sessions/messages/parts from Zustand store (store.ts)
-- [ ] Delete legacy event handlers in Zustand store
-- [ ] Mark internal helpers as non-exported
-- [ ] Verify no imports of deleted code (typecheck should catch)
-- [ ] Update tests to remove references to deleted code
-- [ ] **Bootstrap Refactor:** Convert `sse.ts:503-551` direct `registry.set()` calls to `routeEvent()` calls
-- [ ] **Bootstrap Refactor:** Emit synthetic events for bootstrap data instead of direct atom mutation
+```
+[0a.1: atoms.ts cleanup] ──┐
+[0a.2: sse.ts cleanup]   ──┼── [0a.4: Test migration]
+[0a.3: store.ts cleanup] ──┘
+```
 
-**Files Affected:**
-- `packages/core/src/world/atoms.ts` (delete WorldStore class)
-- `packages/core/src/world/sse.ts` (delete SSE Service pattern)
-- `packages/react/src/store/store.ts` (delete Zustand session/message/part state)
+#### Subtask Details
 
-**Backward Compatibility:** 100% - these are dead code paths that aren't used.
+**0a.1: Delete WorldStore from atoms.ts**
+- Delete `WorldStore` class (replaced by effect-atom primitives)
+- Delete `WorldStoreServiceInterface` (unused abstraction)
+- Delete `WorldStoreService` (Effect.Service wrapper)
+- Delete `WorldStoreServiceLive` (Layer implementation)
+- Location: `packages/core/src/world/atoms.ts:48+`
 
-**Timeline:** Complete before Phase 1 (blocking).
+**0a.2: Delete SSE Effect.Service from sse.ts**
+- Delete `createWorldSSE` (replaced by direct SSE connection)
+- Delete `SSEService` (unused Effect.Service)
+- Delete `SSEServiceLive` (Layer implementation)
+- Location: `packages/core/src/world/sse.ts`
 
-### Phase 0b: Event Router Unification (PREREQUISITE)
+**0a.3: Clean Zustand store.ts**
+- Delete `sessions`, `messages`, `parts` from `DirectoryState`
+- Remove `handleEvent()` cases for session/message/part events
+- Remove binary search operations on session/message/part arrays
+- **KEEP ONLY:** `ready`, `todos`, `modelLimits` (UI-local state)
+- Location: `packages/react/src/store/store.ts:162-177`
 
-**Scope:** Merge duplicate event routing code into single canonical router.
+**0a.4: Test Migration**
+- Find all tests importing deleted code
+- Delete tests for deleted functionality
+- Update tests that reference deleted types
+- Run full test suite to verify
 
-**Problem:** Two event routing implementations exist:
-1. `packages/core/src/world/event-router.ts` - Main router for SSE events
-2. `packages/core/src/world/merged-stream.ts:routeEventToRegistry()` - Duplicate logic for pluggable sources
+#### Success Criteria
 
-**Changes:**
-1. Merge `routeEventToRegistry()` into `event-router.ts`
-2. Export single `routeEvent()` function that ALL event sources use
-3. Remove duplicate routing logic from `merged-stream.ts`
-4. Update all callers to use unified router
+- [ ] `bun run typecheck` passes
+- [ ] `bun run test` passes
+- [ ] No imports of deleted code remain
+- [ ] Zustand store only contains UI-local state
 
-**Checklist:**
+#### Shared Context for Workers
 
-- [ ] Audit `merged-stream.ts` for routing logic
-- [ ] Move any unique routing to `event-router.ts`
-- [ ] Delete `routeEventToRegistry()` from `merged-stream.ts`
-- [ ] Update imports in all consumers
-- [ ] Verify SSE and pluggable sources both use unified router
+```
+PHASE 0a: Dead Code Deletion
 
-**Backward Compatibility:** 100% - internal refactor only.
+You are deleting UNUSED code. These are dead code paths that aren't called.
+The reactive flow now uses effect-atom exclusively (ADR-018).
 
-**Timeline:** Can be done in parallel with Phase 0a.
+DO NOT delete:
+- effect-atom primitives (sessionsAtom, messagesAtom, etc.)
+- routeEvent() function
+- Any code with active callers
+
+After deletion, run: bun run typecheck && bun run test
+```
+
+---
+
+### Phase 0b: Bootstrap Refactor (PREREQUISITE)
+
+**Epic Goal:** Convert direct `registry.set()` calls to `routeEvent()` for bootstrap data.
+
+**Why:** Ensures ALL state mutations follow the same path, simplifies debugging and testing.
+
+**Blocking:** Must complete before Phase 2 (event routing changes).
+
+#### Subtask Decomposition
+
+| ID | Subtask | Files | Parallel? | Depends On |
+|----|---------|-------|-----------|------------|
+| 0b.1 | Audit bootstrap registry.set() calls | `sse.ts:503-551` | ✅ Yes | - |
+| 0b.2 | Create synthetic event emitters | `sse.ts` | ⚠️ Sequential | 0b.1 |
+| 0b.3 | Replace direct mutations with routeEvent() | `sse.ts` | ⚠️ Sequential | 0b.2 |
+
+#### Dependency Graph
+
+```
+[0b.1: Audit] → [0b.2: Create emitters] → [0b.3: Replace mutations]
+```
+
+#### Subtask Details
+
+**0b.1: Audit Bootstrap Code**
+- Read `sse.ts:503-551`
+- Document all `registry.set()` calls
+- Identify what synthetic events are needed
+- Output: List of mutations to convert
+
+**0b.2: Create Synthetic Event Emitters**
+- Create helper functions that emit events matching SSE event schema
+- Events: `session.created`, `message.updated`, `message.part.updated`, etc.
+- Must match exact shape expected by `routeEvent()`
+
+**0b.3: Replace Direct Mutations**
+- Replace each `registry.set(atom, value)` with `routeEvent(syntheticEvent, registry)`
+- Verify bootstrap still populates atoms correctly
+- Run tests to confirm behavior unchanged
+
+#### Success Criteria
+
+- [ ] No direct `registry.set()` calls in bootstrap path
+- [ ] All bootstrap data flows through `routeEvent()`
+- [ ] `bun run typecheck` passes
+- [ ] `bun run test` passes
+- [ ] Manual verification: bootstrap still works
+
+#### Shared Context for Workers
+
+```
+PHASE 0b: Bootstrap Refactor
+
+Goal: ALL state mutations must go through routeEvent(), including bootstrap.
+
+Current: sse.ts:503-551 uses registry.set() directly for initial data load.
+Target: Emit synthetic events that routeEvent() processes.
+
+This ensures:
+1. Single code path for all state changes
+2. Easier debugging (one place to log)
+3. Consistent event handling
+```
+
+---
+
+### Phase 0c: Event Router Unification (PREREQUISITE)
+
+**Epic Goal:** Merge duplicate event routing into single canonical router.
+
+**Why:** Two routing implementations exist, causing maintenance burden and potential drift.
+
+**Can Run:** In parallel with Phase 0b (after 0a completes).
+
+#### Subtask Decomposition
+
+| ID | Subtask | Files | Parallel? | Depends On |
+|----|---------|-------|-----------|------------|
+| 0c.1 | Audit merged-stream.ts for routing logic | `merged-stream.ts` | ✅ Yes | - |
+| 0c.2 | Move unique routing to event-router.ts | `event-router.ts` | ⚠️ Sequential | 0c.1 |
+| 0c.3 | Delete routeEventToRegistry() | `merged-stream.ts` | ⚠️ Sequential | 0c.2 |
+| 0c.4 | Update all callers | Various | ⚠️ Sequential | 0c.3 |
+
+#### Dependency Graph
+
+```
+[0c.1: Audit] → [0c.2: Move logic] → [0c.3: Delete duplicate] → [0c.4: Update callers]
+```
+
+#### Subtask Details
+
+**0c.1: Audit Routing Logic**
+- Find `routeEventToRegistry()` in `merged-stream.ts`
+- Compare with `routeEvent()` in `event-router.ts`
+- Document any unique logic in merged-stream version
+
+**0c.2: Move Unique Logic**
+- If merged-stream has unique routing, move to event-router.ts
+- Ensure event-router.ts handles ALL event types
+- Export single `routeEvent()` function
+
+**0c.3: Delete Duplicate**
+- Delete `routeEventToRegistry()` from merged-stream.ts
+- Remove any helper functions only used by deleted code
+
+**0c.4: Update Callers**
+- Find all imports of `routeEventToRegistry`
+- Replace with `routeEvent` from event-router.ts
+- Verify SSE and pluggable sources both use unified router
+
+#### Success Criteria
+
+- [ ] Single `routeEvent()` function in `event-router.ts`
+- [ ] No routing logic in `merged-stream.ts`
+- [ ] All event sources use unified router
+- [ ] `bun run typecheck` passes
+- [ ] `bun run test` passes
+
+#### Shared Context for Workers
+
+```
+PHASE 0c: Event Router Unification
+
+Problem: Two routing implementations exist:
+1. event-router.ts:routeEvent() - Main router
+2. merged-stream.ts:routeEventToRegistry() - Duplicate for pluggable sources
+
+Goal: Single routeEvent() in event-router.ts that ALL sources use.
+
+After this phase, event-router.ts is the ONLY place events are routed.
+```
+
+---
 
 ### Phase 1: idleTTL Infrastructure (Non-Breaking)
 
-**Scope:** Enable native idleTTL on tiered atoms without changing public API.
+**Epic Goal:** Enable native idleTTL on tiered atoms without changing public API.
 
-**Changes:**
-1. Apply `Atom.setIdleTTL(Duration.minutes(5))` to session-tier atoms
-2. Configure registry with `defaultIdleTTL` for new atoms
-3. Add metrics for subscription count tracking
-4. No public API changes
+**Why:** Prepares infrastructure for automatic cleanup without breaking existing consumers.
 
-**Note:** Uses effect-atom's NATIVE idleTTL, not a custom wrapper.
+**Depends On:** Phase 0a, 0b, 0c complete.
 
-**Backward Compatibility:** 100% - existing `subscribeWorld()` continues to work.
+#### Subtask Decomposition
 
-**Files Affected:**
-- `packages/core/src/world/atoms.ts` (add `Atom.setIdleTTL()` pipes)
-- `packages/core/src/world/merged-stream.ts` (pass registry config)
+| ID | Subtask | Files | Parallel? | Depends On |
+|----|---------|-------|-----------|------------|
+| 1.1 | Add Atom.setIdleTTL() pipes to atoms | `atoms.ts` | ✅ Yes | - |
+| 1.2 | Configure registry defaultIdleTTL | `merged-stream.ts` | ✅ Yes | - |
+| 1.3 | Add subscription count metrics | `atoms.ts`, `metrics.ts` | ✅ Yes | - |
+| 1.4 | Add idleTTL lifecycle tests | `idle-ttl.test.ts` | ✅ Yes | - |
+
+#### Dependency Graph
+
+```
+[1.1: Atom pipes]      ──┐
+[1.2: Registry config] ──┼── (all parallel, no dependencies)
+[1.3: Metrics]         ──┤
+[1.4: Tests]           ──┘
+```
+
+#### Subtask Details
+
+**1.1: Add idleTTL to Atoms**
+- Apply `Atom.setIdleTTL(Duration.minutes(5))` to session-tier atoms
+- Keep `Atom.keepAlive` on global atoms (worldStateAtom)
+- Location: `packages/core/src/world/atoms.ts`
+
+**1.2: Configure Registry**
+- Add `defaultIdleTTL` config option to registry creation
+- Add SSR detection: `typeof window === 'undefined' ? undefined : 300_000`
+- Location: `packages/core/src/world/merged-stream.ts`
+
+**1.3: Add Metrics**
+- Track subscription count per atom tier
+- Export metrics for monitoring
+- Location: New file or extend `atoms.ts`
+
+**1.4: Add Lifecycle Tests**
+- Test: Atom disposes after TTL with zero subscribers
+- Test: New subscription cancels TTL timer
+- Test: Multiple subscribers share subscription count
+- Test: Cleanup ordering (child before parent)
+- Location: `packages/core/src/world/idle-ttl.test.ts`
+
+#### Success Criteria
+
+- [ ] Session atoms have idleTTL configured
+- [ ] Global atoms retain keepAlive
+- [ ] SSR disables idleTTL (no timers on server)
+- [ ] All lifecycle tests pass
+- [ ] `bun run typecheck` passes
+- [ ] `bun run test` passes
+
+#### Shared Context for Workers
+
+```
+PHASE 1: idleTTL Infrastructure
+
+Goal: Enable native effect-atom idleTTL without changing public API.
+
+Key patterns:
+- Atom.setIdleTTL(Duration.minutes(5)) for session atoms
+- Atom.keepAlive for global atoms (worldStateAtom)
+- SSR detection: typeof window === 'undefined'
+
+GOTCHA: Atom.setIdleTTL() implicitly sets keepAlive: false.
+Atoms will reset to initial value after TTL expires with zero subscribers.
+
+Use vi.useFakeTimers() in tests to control timer behavior.
+```
+
+---
 
 ### Phase 2: SessionAtom Tier (Non-Breaking)
 
-**Scope:** Add per-session atoms without removing global atoms.
+**Epic Goal:** Add per-session atoms without removing global atoms.
 
-**Changes:**
-1. Create `SessionAtom` type in `packages/core/src/world/session-atom.ts`
-2. Create `sessionAtomRegistry: Map<sessionId, SessionAtom>` (lazy creation)
-3. Add `subscribeSession()` public API
-4. Route session events to SessionAtom first, then propagate to global
+**Why:** Components subscribe to exactly what they need, reducing unnecessary re-renders.
 
-**Backward Compatibility:** 100% - `subscribeWorld()` continues to work, `subscribeSession()` is additive.
+**Depends On:** Phase 1 complete.
 
-**Files Affected:**
-- `packages/core/src/world/session-atom.ts` (NEW)
-- `packages/core/src/world/subscriptions.ts` (add subscribeSession)
-- `packages/core/src/world/event-router.ts` (route to SessionAtom)
-- `packages/react/src/hooks/use-session.ts` (add useSession)
+#### Subtask Decomposition
+
+| ID | Subtask | Files | Parallel? | Depends On |
+|----|---------|-------|-----------|------------|
+| 2.1 | Create SessionAtom type | `session-atom.ts` (NEW) | ✅ Yes | - |
+| 2.2 | Create sessionAtomRegistry | `session-atom.ts` | ⚠️ Sequential | 2.1 |
+| 2.3 | Add subscribeSession() API | `subscriptions.ts` | ⚠️ Sequential | 2.1 |
+| 2.4 | Add useSession React hook | `use-session.ts` (NEW) | ⚠️ Sequential | 2.3 |
+| 2.5 | Update event-router for SessionAtom | `event-router.ts` | ⚠️ Sequential | 2.1, 2.2 |
+| 2.6 | Add core subscription tests | `subscriptions.test.ts` | ⚠️ Sequential | 2.3 |
+| 2.7 | Add tier routing tests | `event-router.test.ts` | ⚠️ Sequential | 2.5 |
+
+#### Dependency Graph
+
+```
+                    ┌── [2.3: subscribeSession] ── [2.4: useSession hook]
+                    │                          └── [2.6: Subscription tests]
+[2.1: SessionAtom] ─┤
+                    └── [2.2: Registry] ── [2.5: Event routing] ── [2.7: Routing tests]
+```
+
+#### Subtask Details
+
+**2.1: Create SessionAtom Type**
+```typescript
+// packages/core/src/world/session-atom.ts
+interface SessionAtom {
+  sessionAtom: Atom<Session>
+  messagesAtom: Atom<Map<string, Message>>
+  partsAtom: Atom<Map<string, Part>>
+  statusAtom: Atom<SessionStatus>
+  enrichedSessionAtom: Atom<EnrichedSession>  // Derived
+}
+```
+
+**2.2: Create Session Registry**
+```typescript
+// Lazy creation pattern
+const sessionAtomRegistry = new Map<string, SessionAtom>()
+
+function getOrCreateSessionAtom(sessionId: string, registry: Registry): SessionAtom {
+  if (!sessionAtomRegistry.has(sessionId)) {
+    sessionAtomRegistry.set(sessionId, createSessionAtom(sessionId, registry))
+  }
+  return sessionAtomRegistry.get(sessionId)!
+}
+```
+
+**2.3: Add subscribeSession() API**
+- Location: `packages/core/src/world/subscriptions.ts`
+- Signature: `subscribeSession(sessionId: string, callback: (session: EnrichedSession) => void): Unsubscribe`
+- Internally subscribes to SessionAtom's leaf atoms
+
+**2.4: Add useSession Hook**
+- Location: `packages/react/src/hooks/use-session.ts`
+- Uses `useSyncExternalStore` with `subscribeSession`
+- Returns `EnrichedSession | undefined`
+
+**2.5: Update Event Router**
+- Modify `routeEvent()` to route session events to SessionAtom first
+- Then propagate to global atoms
+- Location: `packages/core/src/world/event-router.ts`
+
+**2.6: Core Subscription Tests**
+- Test: subscribeSession only fires for THIS session
+- Test: subscribeWorld fires for ANY session
+- Test: Unsubscribe stops callbacks
+- Location: `packages/core/src/world/subscriptions.test.ts`
+
+**2.7: Tier Routing Tests**
+- Test: Event routes to correct SessionAtom
+- Test: SessionAtom change propagates to worldStateAtom
+- Location: `packages/core/src/world/event-router.test.ts`
+
+#### Success Criteria
+
+- [ ] `subscribeSession()` API works
+- [ ] `useSession()` hook works
+- [ ] Session pages only re-render on their session's changes
+- [ ] `subscribeWorld()` still works (backward compat)
+- [ ] All tests pass
+- [ ] `bun run typecheck` passes
+
+#### Shared Context for Workers
+
+```
+PHASE 2: SessionAtom Tier
+
+Goal: Per-session subscriptions so components only re-render when THEIR session changes.
+
+Architecture:
+- SessionAtom contains: sessionAtom, messagesAtom, partsAtom, statusAtom, enrichedSessionAtom
+- sessionAtomRegistry: Map<sessionId, SessionAtom> with lazy creation
+- subscribeSession(id, callback) subscribes to SessionAtom's leaf atoms
+- Event routing: SSE event → SessionAtom → worldStateAtom (propagation)
+
+Key files:
+- NEW: packages/core/src/world/session-atom.ts
+- NEW: packages/react/src/hooks/use-session.ts
+- MODIFY: packages/core/src/world/subscriptions.ts
+- MODIFY: packages/core/src/world/event-router.ts
+
+Backward compat: subscribeWorld() and useWorld() continue to work unchanged.
+```
+
+---
 
 ### Phase 3: ProjectAtom and MachineAtom Tiers (Non-Breaking)
 
-**Scope:** Complete the 3-tier hierarchy.
+**Epic Goal:** Complete the 3-tier hierarchy (Machine → Project → Session → World).
 
-**Changes:**
-1. Create `ProjectAtom` and `MachineAtom` types
-2. Add `subscribeProject()` and `subscribeMachine()` APIs
-3. Update event router to propagate through all tiers
-4. Add discovery integration (MachineAtom created on server discovery)
+**Why:** Full granularity for subscriptions at any level.
 
-**Backward Compatibility:** 100% - all existing APIs preserved.
+**Depends On:** Phase 2 complete.
 
-**Files Affected:**
-- `packages/core/src/world/project-atom.ts` (NEW)
-- `packages/core/src/world/machine-atom.ts` (NEW)
-- `packages/core/src/world/subscriptions.ts` (add APIs)
-- `packages/core/src/world/sse.ts` (integrate with discovery)
+#### Subtask Decomposition
+
+| ID | Subtask | Files | Parallel? | Depends On |
+|----|---------|-------|-----------|------------|
+| 3.1 | Create ProjectAtom type | `project-atom.ts` (NEW) | ✅ Yes | - |
+| 3.2 | Create MachineAtom type | `machine-atom.ts` (NEW) | ✅ Yes | - |
+| 3.3 | Add subscribeProject() API | `subscriptions.ts` | ⚠️ Sequential | 3.1 |
+| 3.4 | Add subscribeMachine() API | `subscriptions.ts` | ⚠️ Sequential | 3.2 |
+| 3.5 | Update event-router for Project tier | `event-router.ts` | ⚠️ Sequential | 3.1 |
+| 3.6 | Update event-router for Machine tier | `event-router.ts` | ⚠️ Sequential | 3.2 |
+| 3.7 | Add discovery integration | `sse.ts` | ⚠️ Sequential | 3.2 |
+| 3.8 | Add 4-layer invalidation tests | `event-router.test.ts` | ⚠️ Sequential | 3.5, 3.6 |
+| 3.9 | Memory profiling benchmarks | `benchmarks/` | ⚠️ Sequential | All |
+
+#### Dependency Graph
+
+```
+[3.1: ProjectAtom] ──┬── [3.3: subscribeProject]
+                     └── [3.5: Project routing] ──┐
+                                                  ├── [3.8: Chain tests] ── [3.9: Benchmarks]
+[3.2: MachineAtom] ──┬── [3.4: subscribeMachine]  │
+                     ├── [3.6: Machine routing] ──┘
+                     └── [3.7: Discovery integration]
+```
+
+#### Subtask Details
+
+**3.1: Create ProjectAtom Type**
+```typescript
+// packages/core/src/world/project-atom.ts
+interface ProjectAtom {
+  machineRefs: Atom<Set<number>>  // Ports serving this project
+  sessionsAtom: Atom<Map<string, SessionAtom>>
+  aggregateStatusAtom: Atom<ProjectStatus>  // Derived from machines
+}
+```
+
+**3.2: Create MachineAtom Type**
+```typescript
+// packages/core/src/world/machine-atom.ts
+interface MachineAtom {
+  instanceAtom: Atom<Instance>
+  statusAtom: Atom<ConnectionStatus>
+  projectRefs: Atom<Set<string>>  // Directories this machine serves
+}
+```
+
+**3.3: Add subscribeProject() API**
+- Signature: `subscribeProject(directory: string, callback: (project: ProjectState) => void): Unsubscribe`
+
+**3.4: Add subscribeMachine() API**
+- Signature: `subscribeMachine(port: number, callback: (machine: MachineState) => void): Unsubscribe`
+
+**3.5: Update Event Router for Project Tier**
+- Session events propagate to ProjectAtom
+- Project aggregates session states
+
+**3.6: Update Event Router for Machine Tier**
+- Instance events update MachineAtom
+- Machine status affects all its projects
+
+**3.7: Discovery Integration**
+- MachineAtom created when server discovered
+- MachineAtom disposed when server goes away
+- Location: `packages/core/src/world/sse.ts`
+
+**3.8: 4-Layer Invalidation Tests**
+- Test: Event fires callbacks in order (session → project → machine → world)
+- Test: Subscribers to OTHER tiers don't receive callbacks
+
+**3.9: Memory Profiling**
+- Benchmark before/after memory usage
+- Measure re-render counts on session pages
+- Document performance improvement
+
+#### Success Criteria
+
+- [ ] All 4 subscription APIs work
+- [ ] Event propagation follows tier hierarchy
+- [ ] Discovery creates/disposes MachineAtoms
+- [ ] Memory usage improved (measured)
+- [ ] All tests pass
+- [ ] `bun run typecheck` passes
+
+#### Shared Context for Workers
+
+```
+PHASE 3: Complete 3-Tier Hierarchy
+
+Goal: Full subscription granularity at any level.
+
+Tier hierarchy:
+  MachineAtom (port-level)
+    └─> ProjectAtom (worktree-level)
+        └─> SessionAtom (session-level)
+            └─> worldStateAtom (global rollup)
+
+Event propagation:
+  SSE event → SessionAtom → ProjectAtom → MachineAtom → worldStateAtom
+
+Key files:
+- NEW: packages/core/src/world/project-atom.ts
+- NEW: packages/core/src/world/machine-atom.ts
+- MODIFY: packages/core/src/world/subscriptions.ts
+- MODIFY: packages/core/src/world/event-router.ts
+- MODIFY: packages/core/src/world/sse.ts (discovery integration)
+
+All existing APIs preserved. New APIs are additive.
+```
+
+---
 
 ### Phase 4: Enable idleTTL by Default (Minor Breaking)
 
-**Scope:** Enable idleTTL cleanup with 5-minute default.
+**Epic Goal:** Enable idleTTL cleanup with 5-minute default.
 
-**Changes:**
-1. Change `idleTTL` config default from `disabled` to `300_000ms`
-2. Add deprecation warning for long-lived subscriptions without explicit keepAlive
-3. Update documentation
+**Why:** Automatic resource cleanup prevents memory leaks.
 
-**Breaking Changes:**
-- Atoms may be cleaned up after 5 minutes of no subscribers
-- Consumers that expect atoms to persist indefinitely need to add `keepAlive: true`
+**Depends On:** Phase 3 complete + benchmarks pass.
 
-**Migration Guide:**
+#### Subtask Decomposition
+
+| ID | Subtask | Files | Parallel? | Depends On |
+|----|---------|-------|-----------|------------|
+| 4.1 | Change idleTTL config default | `merged-stream.ts` | ✅ Yes | - |
+| 4.2 | Add deprecation warning | `subscriptions.ts` | ✅ Yes | - |
+| 4.3 | Build runtime keepAlive detection | `atoms.ts` | ✅ Yes | - |
+| 4.4 | Update documentation | `docs/` | ✅ Yes | - |
+
+#### Dependency Graph
+
+```
+[4.1: Config default]     ──┐
+[4.2: Deprecation warning] ──┼── (all parallel)
+[4.3: Detection tool]      ──┤
+[4.4: Documentation]       ──┘
+```
+
+#### Subtask Details
+
+**4.1: Change Config Default**
+- Change `idleTTL` default from `disabled` to `300_000ms`
+- Location: `packages/core/src/world/merged-stream.ts`
+
+**4.2: Add Deprecation Warning**
+- Warn when long-lived subscriptions don't specify `keepAlive: true`
+- Only in development mode
+
+**4.3: Runtime Detection Tool**
+- Add `__debug` property to atoms for metadata
+- Enable runtime introspection of keepAlive vs idleTTL
+
+**4.4: Update Documentation**
+- Document breaking change
+- Add migration guide
+- Update API docs
+
+#### Breaking Changes
 
 ```typescript
 // Before: Implicit persistence
@@ -1021,44 +1468,209 @@ const world = subscribeWorld(callback)
 // After: Explicit persistence (if needed)
 const world = subscribeWorld(callback, { keepAlive: true })
 
-// Or: Accept cleanup (recommended for most cases)
-const world = subscribeWorld(callback) // Cleans up after 5 min idle
+// Or: Accept cleanup (recommended)
+const world = subscribeWorld(callback)  // Cleans up after 5 min idle
 ```
 
-### Phase 5: Deprecate Direct worldStateAtom Access (Future)
+#### Success Criteria
 
-**Scope:** Guide consumers toward slice APIs.
+- [ ] Default idleTTL is 5 minutes
+- [ ] Deprecation warnings appear in dev mode
+- [ ] Runtime detection tool works
+- [ ] Documentation updated
+- [ ] All tests pass
 
-**Changes:**
-1. Add deprecation warning to `useWorld()` when used on session pages
-2. Recommend `useSession()` in warning message
-3. Eventually remove direct `worldStateAtom` access (major version)
+#### Shared Context for Workers
 
-**Timeline:** 4-6 months total, with justification:
-- Phase 0: +2 weeks (60+ test cases affected by audit, bootstrap refactor complexity)
-- Phase 1: 2 weeks (native idleTTL integration)
-- Phase 2: 3 weeks (SessionAtom tier, event routing changes)
-- Phase 3: +2 weeks (memory profiling before/after benchmarks required)
-- Phase 4: 2 weeks (requires runtime keepAlive detection tool built first)
-- Phase 5: Begin 3+ months after Phase 2 stabilizes
+```
+PHASE 4: Enable idleTTL by Default
 
-**Critical Path Dependencies:**
-- Phase 0b (bootstrap refactor) must complete before Phase 2 (event routing)
-- Phase 3 benchmarks must pass before Phase 4 (enables idleTTL by default)
-- Runtime introspection tool needed before Phase 4 deprecation warnings
+Goal: Automatic cleanup after 5 minutes of zero subscribers.
+
+BREAKING CHANGE:
+- Atoms may be cleaned up after 5 min idle
+- Consumers expecting persistence need { keepAlive: true }
+
+Migration:
+  subscribeWorld(callback)                    // Now cleans up
+  subscribeWorld(callback, { keepAlive: true }) // Explicit persistence
+```
 
 ---
 
-## Testing Strategy
+### Phase 5: Deprecate Direct worldStateAtom Access (Future)
 
-**CRITICAL PRINCIPLE:** NO DOM TESTING. Test core subscription logic and event routing directly. `renderHook` and `render` from `@testing-library` are code smells in this codebase. If the DOM is in the mix, we already lost.
+**Epic Goal:** Guide consumers toward slice APIs.
 
-### Test Categories
+**Why:** Slice APIs are more efficient; direct access bypasses optimizations.
 
-1. **Core Subscription Tests** - Test subscription/event-router invariants directly
-2. **idleTTL Lifecycle Tests** - Test timer behavior, cleanup ordering, race conditions
-3. **Tier Routing Tests** - Test event propagation through Session → Project → Machine → World
-4. **Contract Tests Only** - If React testing absolutely required, super-thin contract tests without DOM
+**Depends On:** Phase 4 stable for 3+ months.
+
+#### Subtask Decomposition
+
+| ID | Subtask | Files | Parallel? | Depends On |
+|----|---------|-------|-----------|------------|
+| 5.1 | Add deprecation warning to useWorld() | `use-world.ts` | ✅ Yes | - |
+| 5.2 | Update documentation with migration | `docs/` | ✅ Yes | - |
+| 5.3 | Add lint rule for useWorld() patterns | `eslint-config/` | ✅ Yes | - |
+
+#### Dependency Graph
+
+```
+[5.1: Deprecation warning] ──┐
+[5.2: Documentation]        ──┼── (all parallel)
+[5.3: Lint rule]            ──┘
+```
+
+#### Subtask Details
+
+**5.1: Add Deprecation Warning**
+- Warn when `useWorld()` used on session pages
+- Recommend `useSession()` in warning message
+- Only in development mode
+
+**5.2: Update Documentation**
+- Add migration guide from useWorld() to useSession()
+- Document when useWorld() is still appropriate (dashboards)
+
+**5.3: Add Lint Rule**
+- Detect useWorld() in session page components
+- Suggest useSession() alternative
+- Configurable severity (warn vs error)
+
+#### Success Criteria
+
+- [ ] Deprecation warnings appear appropriately
+- [ ] Documentation guides migration
+- [ ] Lint rule catches common patterns
+- [ ] No breaking changes (warnings only)
+
+#### Shared Context for Workers
+
+```
+PHASE 5: Deprecate worldStateAtom Access
+
+Goal: Guide consumers toward slice APIs (useSession, useProject, useMachine).
+
+NOT a breaking change - warnings only.
+
+useWorld() is still valid for:
+- Dashboard views showing all sessions
+- Admin panels
+- Debugging tools
+
+useSession() preferred for:
+- Session detail pages
+- Chat interfaces
+- Any single-session view
+```
+
+---
+
+### Phase Execution Summary
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      PHASE EXECUTION ORDER                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  [0a: Dead Code] ──┬── [0b: Bootstrap Refactor]                        │
+│                    └── [0c: Router Unification]                        │
+│                              │                                          │
+│                              ▼                                          │
+│                    [1: idleTTL Infrastructure]                         │
+│                              │                                          │
+│                              ▼                                          │
+│                    [2: SessionAtom Tier]                               │
+│                              │                                          │
+│                              ▼                                          │
+│                    [3: ProjectAtom + MachineAtom]                      │
+│                              │                                          │
+│                              ▼                                          │
+│                    [4: Enable idleTTL Default]                         │
+│                              │                                          │
+│                              ▼                                          │
+│                    [5: Deprecate worldStateAtom]                       │
+│                                                                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│  TIMELINE ESTIMATES                                                     │
+│                                                                         │
+│  Phase 0a: 1 week  (4 parallel workers)                                │
+│  Phase 0b: 3 days  (sequential, 1 file)                                │
+│  Phase 0c: 3 days  (sequential, 2 files)                               │
+│  Phase 1:  1 week  (4 parallel workers)                                │
+│  Phase 2:  2 weeks (7 subtasks, some sequential)                       │
+│  Phase 3:  2 weeks (9 subtasks, some sequential)                       │
+│  Phase 4:  1 week  (4 parallel workers)                                │
+│  Phase 5:  3+ months after Phase 4 (deprecation period)                │
+│                                                                         │
+│  TOTAL: ~8 weeks active development + deprecation period               │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Critical Path Dependencies
+
+| Dependency | Reason |
+|------------|--------|
+| 0a → 0b, 0c | Dead code must be removed before refactoring |
+| 0b → 2 | Bootstrap must use routeEvent() before event routing changes |
+| 0c → 2 | Single router required before adding tier routing |
+| 2 → 3 | SessionAtom pattern established before adding more tiers |
+| 3 → 4 | Benchmarks must pass before enabling cleanup by default |
+| 4 → 5 | idleTTL must be stable before deprecating direct access |
+
+---
+
+## Testing Strategy (Swarm-Ready)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      TESTING PRINCIPLES                                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ❌ NO DOM TESTING                                                      │
+│  ❌ NO renderHook from @testing-library                                 │
+│  ❌ NO render from @testing-library                                     │
+│                                                                         │
+│  ✅ Test core subscription logic directly                               │
+│  ✅ Test event routing with mock registries                             │
+│  ✅ Test timer behavior with vi.useFakeTimers()                         │
+│  ✅ Use Playwright for E2E React behavior                               │
+│                                                                         │
+│  If the DOM is in the mix, you're testing at the wrong layer.          │
+│  Test the Core.                                                         │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Test Categories by Phase
+
+| Phase | Test File | What to Test |
+|-------|-----------|--------------|
+| 0a | Delete existing tests | Remove tests for deleted code |
+| 0b | `bootstrap.test.ts` | Synthetic events populate atoms correctly |
+| 0c | `event-router.test.ts` | Unified router handles all event types |
+| 1 | `idle-ttl.test.ts` | Timer behavior, cleanup ordering |
+| 2 | `subscriptions.test.ts`, `session-atom.test.ts` | Per-session filtering, isolation |
+| 3 | `event-router.test.ts` | 4-layer propagation, tier isolation |
+| 4 | `idle-ttl.test.ts` | Default TTL behavior |
+| 5 | N/A (warnings only) | Manual verification |
+
+### Test File Ownership
+
+Each test file should be owned by ONE worker during a phase. No parallel edits to same test file.
+
+```
+packages/core/src/world/
+├── idle-ttl.test.ts          # Phase 1, 4
+├── subscriptions.test.ts     # Phase 2
+├── session-atom.test.ts      # Phase 2
+├── project-atom.test.ts      # Phase 3
+├── machine-atom.test.ts      # Phase 3
+├── event-router.test.ts      # Phase 0c, 2, 3
+└── mount.test.ts             # Phase 1
+```
 
 ### 1. Core Subscription Tests
 
@@ -1446,16 +2058,15 @@ describe("useSession contract", () => {
 
 ### Risks and Weaknesses
 
-**Risk 1: Phase 0 Blast Radius**
+**Risk 1: Phase 0 Blast Radius** ✅ MITIGATED
 
-Phase 0 combines dead-code deletion + export boundary changes + bootstrap refactor. This increases blast radius before delivering new value.
+Phase 0 is now split into 0a/0b/0c with explicit dependencies. Each sub-phase is independently verifiable.
 
-*Mitigation:* Consider splitting Phase 0 into:
-- **Phase 0a:** Dead code deletion only (safe, reduces cognitive load)
-- **Phase 0b:** Bootstrap refactor (`registry.set()` → `routeEvent()`)
-- **Phase 0c:** Event router unification
-
-Ship Phase 0a first, validate with typecheck + test suite, then proceed.
+*Mitigation applied:*
+- Phase 0a: Dead code deletion only (4 parallel workers)
+- Phase 0b: Bootstrap refactor (sequential, 1 file)
+- Phase 0c: Event router unification (sequential, 2 files)
+- Each sub-phase must pass typecheck + tests before next
 
 **Risk 2: SSR/Runtime Timer Handling**
 
@@ -1466,6 +2077,7 @@ Ship Phase 0a first, validate with typecheck + test suite, then proceed.
 - Disable idleTTL on server
 - Add cleanup tests with fake timers to verify no leaks
 - Document timer behavior in module JSDoc
+- **Worker assignment:** Phase 1.2 (registry config) handles SSR detection
 
 **Risk 3: 4-Layer Invalidation Chain Performance**
 
@@ -1476,15 +2088,17 @@ Session → Project → Machine → World invalidation may cause excessive recom
 - Consider batching invalidation within 16ms frame
 - Profile derived atom recomputation cost
 - Add throttling option to `routeEvent()` for high-frequency event types
+- **Worker assignment:** Phase 3.9 (benchmarks) is blocking for Phase 4
 
-**Risk 4: Test Suite Migration**
+**Risk 4: Test Suite Migration** ✅ MITIGATED
 
-Phase 0 audit may affect 60+ test cases that reference deleted code or use DOM testing patterns.
+Phase 0a now includes explicit test migration subtask (0a.4).
 
-*Mitigation:*
-- Budget 2 extra weeks for Phase 0 test migration
-- Create test migration checklist
-- Add lint rule to prevent new `renderHook` usage
+*Mitigation applied:*
+- Subtask 0a.4 dedicated to test migration
+- Runs after code deletion subtasks complete
+- Clear ownership: one worker handles all test updates
+- Lint rule for `renderHook` added in Phase 5.3
 
 **Risk 5: keepAlive Detection at Runtime**
 
@@ -1493,6 +2107,18 @@ Phase 4 requires detecting which atoms have `keepAlive` vs `idleTTL` at runtime 
 *Mitigation:*
 - Build runtime introspection tool before Phase 4
 - Consider adding `__debug` property to atoms for metadata
+- **Worker assignment:** Phase 4.3 (detection tool) runs in parallel with other Phase 4 work
+
+**Risk 6: Swarm Coordination Complexity** (NEW)
+
+Phases 2 and 3 have complex dependency graphs. Workers may block on each other.
+
+*Mitigation:*
+- Dependency graphs documented in ADR
+- Blocking subtasks clearly marked
+- Coordinator monitors progress and unblocks
+- File reservations prevent edit conflicts
+- Sequential subtasks spawn one worker at a time
 
 ### Success Criteria
 
@@ -1663,14 +2289,384 @@ The following work items remain after this ADR is implemented:
 
 ---
 
-**Next Actions:**
+**Next Actions (Swarm Coordinator Checklist):**
 
-1. **Phase 0a:** Delete dead code (WorldStore, SSE Effect.Service, Zustand legacy handlers)
-2. **Phase 0b:** Bootstrap refactor - convert `sse.ts:503-551` to use `routeEvent()`
-3. **Phase 0c:** Unify event routers (merge `routeEventToRegistry()` into `event-router.ts`)
-4. Run full test suite, migrate any tests using deleted code or DOM patterns
-5. **Phase 1:** Enable native `Atom.setIdleTTL()` on session-tier atoms
-6. Add metrics for subscription counts to validate design
-7. **Phase 2:** Implement SessionAtom tier with feature flag
-8. Benchmark performance improvement on session pages
-9. Roll out to production behind feature flag
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    COORDINATOR EXECUTION GUIDE                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  For each phase:                                                        │
+│  1. Read phase section in this ADR                                      │
+│  2. Create epic with hive_create_epic()                                 │
+│  3. Spawn workers per dependency graph                                  │
+│  4. Monitor with swarmmail_inbox()                                      │
+│  5. Review completed work with swarm_review()                           │
+│  6. Verify: bun run typecheck && bun run test                          │
+│  7. Sync: hive_sync()                                                   │
+│  8. Proceed to next phase                                               │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Phase 0a: Dead Code Deletion** ✅ COMPLETE
+- [x] Spawn 4 parallel workers (0a.1, 0a.2, 0a.3)
+- [x] Wait for completion
+- [x] Spawn 0a.4 (test migration)
+- [x] Verify: `bun run typecheck && bun run test` (101 files, 1157 tests pass)
+
+**Phase 0b: Bootstrap Refactor** (can run parallel with 0c)
+- [ ] Spawn sequential workers (0b.1 → 0b.2 → 0b.3)
+- [ ] Verify: `bun run typecheck && bun run test`
+
+**Phase 0c: Router Unification** (can run parallel with 0b)
+- [ ] Spawn sequential workers (0c.1 → 0c.2 → 0c.3 → 0c.4)
+- [ ] Verify: `bun run typecheck && bun run test`
+
+**Phase 1: idleTTL Infrastructure**
+- [ ] Spawn 4 parallel workers (1.1, 1.2, 1.3, 1.4)
+- [ ] Verify: `bun run typecheck && bun run test`
+
+**Phase 2: SessionAtom Tier**
+- [ ] Spawn 2.1 (blocking)
+- [ ] After 2.1: Spawn 2.2, 2.3 in parallel
+- [ ] After 2.2: Spawn 2.5
+- [ ] After 2.3: Spawn 2.4, 2.6
+- [ ] After 2.5: Spawn 2.7
+- [ ] Verify: `bun run typecheck && bun run test`
+- [ ] Manual test: Session page only re-renders on its own changes
+
+**Phase 3: ProjectAtom + MachineAtom**
+- [ ] Spawn 3.1, 3.2 in parallel (blocking)
+- [ ] After 3.1: Spawn 3.3, 3.5
+- [ ] After 3.2: Spawn 3.4, 3.6, 3.7
+- [ ] After 3.5, 3.6: Spawn 3.8
+- [ ] After all: Spawn 3.9 (benchmarks)
+- [ ] Verify: `bun run typecheck && bun run test`
+- [ ] Verify: Memory benchmarks show improvement
+
+**Phase 4: Enable idleTTL Default**
+- [ ] Spawn 4 parallel workers (4.1, 4.2, 4.3, 4.4)
+- [ ] Verify: `bun run typecheck && bun run test`
+- [ ] Document breaking change in CHANGELOG
+
+**Phase 5: Deprecate worldStateAtom** (3+ months after Phase 4)
+- [ ] Spawn 3 parallel workers (5.1, 5.2, 5.3)
+- [ ] Verify: Warnings appear correctly
+- [ ] Monitor adoption of slice APIs
+
+---
+
+## Implementation Log
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      IMPLEMENTATION TRACKING                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  This section tracks actual execution vs. planned.                      │
+│  Updated by swarm coordinators as phases complete.                      │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Phase 0a: Dead Code Deletion
+
+**Status:** ✅ Complete  
+**Started:** 2026-01-07  
+**Completed:** 2026-01-07  
+**Coordinator:** Swarm Coordinator (main session)
+
+#### Execution Notes
+
+| Subtask | Status | Worker | Files Modified | Notes |
+|---------|--------|--------|----------------|-------|
+| 0a.1: Delete WorldStore from atoms.ts | ✅ Complete | swarm-worker | atoms.ts, merged-stream.ts, sse.ts, stream.test.ts, atoms.test.ts (deleted) | Removed 600+ lines: WorldStore class, services, tests |
+| 0a.2: Delete SSE Effect.Service from sse.ts | ✅ Complete | swarm-worker | sse.ts, index.ts, sse.test.ts, sse-service.test.ts (deleted) | Removed 94 lines: createWorldSSE, SSEService, SSEServiceLive |
+| 0a.3: Clean Zustand store.ts | ✅ Complete | swarm-worker | store.ts, types.ts, factory.ts | Removed ~370 lines: sessions/messages/parts from Zustand, delegated to World Stream |
+| 0a.4: Test migration | ✅ Complete | main session | merged-stream.integration.test.ts, 7 test files deleted | Fixed mock part data to align with Effect Schema types |
+
+#### Summary
+
+**~5,800 lines of dead code removed:**
+- `WorldStore` class from `atoms.ts` (600+ lines)
+- `SSEService` Effect.Service wrapper from `sse.ts` (94 lines)
+- Session/message/part handlers from Zustand store (~370 lines)
+- 7 test files testing deleted code (~3,500 lines)
+
+**Final state:**
+- ✅ `bun run typecheck` passes
+- ✅ `bun run test` passes (101 files, 1157 tests)
+- ✅ No imports of deleted code remain
+- ✅ Zustand store only contains UI-local state (ready flag, todos, model limits)
+
+#### Blockers Encountered
+
+_None_
+
+#### Deviations from Plan
+
+1. **factory.ts modified** - Worker 0a.3 also updated factory.ts to delegate to World Stream hooks instead of Zustand. This was necessary to maintain backward compatibility.
+
+2. **Test data alignment** - 0a.4 required fixing mock part data in `merged-stream.integration.test.ts` to use correct Effect Schema types (`type: "tool"` instead of `type: "tool_use"`, adding required `sessionID` field).
+
+#### Learnings
+
+1. **Zustand → World Stream delegation pattern**: Factory methods now act as thin compatibility wrappers:
+   - `useSession()` → delegates to `useWorldSession()`
+   - `useMessages()` → delegates to `useWorldMessages()`
+   - `useSessionList()` → delegates to `useWorldSessionList()`
+
+2. **Test file deletion**: atoms.test.ts (1912 lines) and sse-service.test.ts (153 lines) were deleted as they tested removed code.
+
+3. **Effect Schema alignment**: Mock data in tests must match Effect Schema types exactly. The `Part` schema uses `type: "tool"` (not `"tool_use"`) and requires `sessionID` field.
+
+---
+
+### Phase 0b: Bootstrap Refactor
+
+**Status:** 🔴 Not Started  
+**Started:** -  
+**Completed:** -  
+**Coordinator:** -
+
+#### Execution Notes
+
+| Subtask | Status | Worker | Files Modified | Notes |
+|---------|--------|--------|----------------|-------|
+| 0b.1: Audit bootstrap registry.set() calls | ⬜ Pending | - | - | - |
+| 0b.2: Create synthetic event emitters | ⬜ Pending | - | - | - |
+| 0b.3: Replace direct mutations with routeEvent() | ⬜ Pending | - | - | - |
+
+#### Blockers Encountered
+
+_None yet_
+
+#### Deviations from Plan
+
+_None yet_
+
+#### Learnings
+
+_None yet_
+
+---
+
+### Phase 0c: Event Router Unification
+
+**Status:** 🔴 Not Started  
+**Started:** -  
+**Completed:** -  
+**Coordinator:** -
+
+#### Execution Notes
+
+| Subtask | Status | Worker | Files Modified | Notes |
+|---------|--------|--------|----------------|-------|
+| 0c.1: Audit merged-stream.ts for routing logic | ⬜ Pending | - | - | - |
+| 0c.2: Move unique routing to event-router.ts | ⬜ Pending | - | - | - |
+| 0c.3: Delete routeEventToRegistry() | ⬜ Pending | - | - | - |
+| 0c.4: Update all callers | ⬜ Pending | - | - | - |
+
+#### Blockers Encountered
+
+_None yet_
+
+#### Deviations from Plan
+
+_None yet_
+
+#### Learnings
+
+_None yet_
+
+---
+
+### Phase 1: idleTTL Infrastructure
+
+**Status:** 🔴 Not Started  
+**Started:** -  
+**Completed:** -  
+**Coordinator:** -
+
+#### Execution Notes
+
+| Subtask | Status | Worker | Files Modified | Notes |
+|---------|--------|--------|----------------|-------|
+| 1.1: Add Atom.setIdleTTL() pipes to atoms | ⬜ Pending | - | - | - |
+| 1.2: Configure registry defaultIdleTTL | ⬜ Pending | - | - | - |
+| 1.3: Add subscription count metrics | ⬜ Pending | - | - | - |
+| 1.4: Add idleTTL lifecycle tests | ⬜ Pending | - | - | - |
+
+#### Blockers Encountered
+
+_None yet_
+
+#### Deviations from Plan
+
+_None yet_
+
+#### Learnings
+
+_None yet_
+
+---
+
+### Phase 2: SessionAtom Tier
+
+**Status:** 🔴 Not Started  
+**Started:** -  
+**Completed:** -  
+**Coordinator:** -
+
+#### Execution Notes
+
+| Subtask | Status | Worker | Files Modified | Notes |
+|---------|--------|--------|----------------|-------|
+| 2.1: Create SessionAtom type | ⬜ Pending | - | - | - |
+| 2.2: Create sessionAtomRegistry | ⬜ Pending | - | - | - |
+| 2.3: Add subscribeSession() API | ⬜ Pending | - | - | - |
+| 2.4: Add useSession React hook | ⬜ Pending | - | - | - |
+| 2.5: Update event-router for SessionAtom | ⬜ Pending | - | - | - |
+| 2.6: Add core subscription tests | ⬜ Pending | - | - | - |
+| 2.7: Add tier routing tests | ⬜ Pending | - | - | - |
+
+#### Blockers Encountered
+
+_None yet_
+
+#### Deviations from Plan
+
+_None yet_
+
+#### Learnings
+
+_None yet_
+
+---
+
+### Phase 3: ProjectAtom + MachineAtom
+
+**Status:** 🔴 Not Started  
+**Started:** -  
+**Completed:** -  
+**Coordinator:** -
+
+#### Execution Notes
+
+| Subtask | Status | Worker | Files Modified | Notes |
+|---------|--------|--------|----------------|-------|
+| 3.1: Create ProjectAtom type | ⬜ Pending | - | - | - |
+| 3.2: Create MachineAtom type | ⬜ Pending | - | - | - |
+| 3.3: Add subscribeProject() API | ⬜ Pending | - | - | - |
+| 3.4: Add subscribeMachine() API | ⬜ Pending | - | - | - |
+| 3.5: Update event-router for Project tier | ⬜ Pending | - | - | - |
+| 3.6: Update event-router for Machine tier | ⬜ Pending | - | - | - |
+| 3.7: Add discovery integration | ⬜ Pending | - | - | - |
+| 3.8: Add 4-layer invalidation tests | ⬜ Pending | - | - | - |
+| 3.9: Memory profiling benchmarks | ⬜ Pending | - | - | - |
+
+#### Blockers Encountered
+
+_None yet_
+
+#### Deviations from Plan
+
+_None yet_
+
+#### Learnings
+
+_None yet_
+
+---
+
+### Phase 4: Enable idleTTL Default
+
+**Status:** 🔴 Not Started  
+**Started:** -  
+**Completed:** -  
+**Coordinator:** -
+
+#### Execution Notes
+
+| Subtask | Status | Worker | Files Modified | Notes |
+|---------|--------|--------|----------------|-------|
+| 4.1: Change idleTTL config default | ⬜ Pending | - | - | - |
+| 4.2: Add deprecation warning | ⬜ Pending | - | - | - |
+| 4.3: Build runtime keepAlive detection | ⬜ Pending | - | - | - |
+| 4.4: Update documentation | ⬜ Pending | - | - | - |
+
+#### Blockers Encountered
+
+_None yet_
+
+#### Deviations from Plan
+
+_None yet_
+
+#### Learnings
+
+_None yet_
+
+---
+
+### Phase 5: Deprecate worldStateAtom Access
+
+**Status:** 🔴 Not Started  
+**Started:** -  
+**Completed:** -  
+**Coordinator:** -
+
+#### Execution Notes
+
+| Subtask | Status | Worker | Files Modified | Notes |
+|---------|--------|--------|----------------|-------|
+| 5.1: Add deprecation warning to useWorld() | ⬜ Pending | - | - | - |
+| 5.2: Update documentation with migration | ⬜ Pending | - | - | - |
+| 5.3: Add lint rule for useWorld() patterns | ⬜ Pending | - | - | - |
+
+#### Blockers Encountered
+
+_None yet_
+
+#### Deviations from Plan
+
+_None yet_
+
+#### Learnings
+
+_None yet_
+
+---
+
+### Global Implementation Notes
+
+#### Key Decisions Made During Implementation
+
+| Date | Decision | Rationale | Impact |
+|------|----------|-----------|--------|
+| - | - | - | - |
+
+#### Cross-Phase Learnings
+
+_Learnings that apply across multiple phases will be documented here._
+
+#### Performance Measurements
+
+| Metric | Before | After | Phase |
+|--------|--------|-------|-------|
+| Session page re-renders per world change | TBD | TBD | Phase 2 |
+| Memory usage (10 sessions, 5 min idle) | TBD | TBD | Phase 3 |
+| Atom cleanup after TTL | N/A | TBD | Phase 4 |
+
+#### Files Created
+
+| File | Phase | Purpose |
+|------|-------|---------|
+| - | - | - |
+
+#### Files Deleted
+
+| File | Phase | Reason |
+|------|-------|--------|
+| - | - | - |
