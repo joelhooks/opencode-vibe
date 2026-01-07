@@ -9,6 +9,9 @@ export {
 	type UseSessionReturn,
 } from "./hooks/use-session-facade"
 
+// SessionAtom (ADR-019 Phase 2 - Per-Session Atoms)
+export { useSession as useSessionAtom } from "./hooks/use-session"
+
 export {
 	useSSE,
 	type UseSSEOptions,
@@ -96,7 +99,6 @@ export {
 // Store (Phase 1: Core Store + Binary Utils)
 export {
 	useOpencodeStore,
-	usePartSummary,
 	type DirectoryState,
 	type ContextUsage,
 	type CompactionState as StoreCompactionState,

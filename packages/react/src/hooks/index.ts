@@ -14,6 +14,13 @@ export { useWorldCompactionState } from "./use-world-compaction-state"
 export { useWorldSessionStatus } from "./use-world-session-status"
 export { useWorldDebug } from "./use-world-debug"
 
+// SessionAtom (ADR-019 Phase 2 - Per-Session Atoms)
+// NEW: Granular per-session subscription using SessionAtom + useSyncExternalStore
+// Alternative to useWorldSession (which subscribes to global world state)
+export { useSession as useSessionAtom } from "./use-session"
+export { useSessionMessages } from "./use-session-messages"
+export { useSessionParts } from "./use-session-parts"
+
 // Unified Facade
 export {
 	useSession,

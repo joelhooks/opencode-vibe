@@ -2,7 +2,7 @@
 
 import { Fragment, useMemo, memo } from "react"
 import type { UIMessage, ChatStatus } from "ai"
-import { useMessagesWithParts, useSessionStatus } from "@/app/hooks"
+import { useSessionAtom } from "@opencode-vibe/react"
 import {
 	transformMessages,
 	type ExtendedUIMessage,
@@ -282,19 +282,18 @@ export function SessionMessages({
 	initialStoreParts,
 	status: externalStatus,
 }: SessionMessagesProps) {
-	// Get messages with parts from World Stream (reactive)
-	const storeMessages = useMessagesWithParts(sessionId)
-
-	// Get session status from World Stream (reactive)
-	const sessionStatus = useSessionStatus(sessionId)
-	const running = sessionStatus === "running"
+	// Get session data from per-session atom (ADR-019 Phase 3)
+	// useSessionAtom returns EnrichedSession { session, messages, parts, status, isActive }
+	const enrichedSession = useSessionAtom(sessionId)
+	const sessionMessages = enrichedSession.messages
+	const running = enrichedSession.status === "running"
 
 	// Transform World Stream messages to UIMessage format (with extended metadata)
 	// Use initialMessages for zero-flicker until World Stream connects and populates
 	const messages = useMemo(() => {
-		if (storeMessages.length === 0) return initialMessages as ExtendedUIMessage[]
-		return transformMessages(storeMessages as unknown as OpencodeMessage[]) as ExtendedUIMessage[]
-	}, [storeMessages, initialMessages])
+		if (sessionMessages.length === 0) return initialMessages as ExtendedUIMessage[]
+		return transformMessages(sessionMessages as unknown as OpencodeMessage[]) as ExtendedUIMessage[]
+	}, [sessionMessages, initialMessages])
 
 	// Determine status: external (from parent) > running (from store) > ready
 	const status: ChatStatus = externalStatus ?? (running ? "streaming" : "ready")

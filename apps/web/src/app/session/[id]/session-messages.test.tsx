@@ -23,17 +23,21 @@ describe("SessionMessages", () => {
 			 * - World Stream never saw the hydrated data → no messages displayed
 			 * - SSE events went to World Stream but UI showed "No messages yet"
 			 *
-			 * FIX:
+			 * FIX (Phase 2):
 			 * - Removed Zustand hydration entirely
 			 * - World Stream hooks are reactive (useWorld → useSyncExternalStore)
 			 * - SSE events flow: WorldSSE → routeEvent → messagesAtom/partsAtom → notifySubscribers → React re-render
 			 * - Initial render uses initialMessages prop (zero-flicker)
 			 * - Once SSE connects, World Stream populates and hooks trigger re-render
 			 *
+			 * EVOLUTION (Phase 3):
+			 * - Migrated from global useMessagesWithParts to per-session useSession
+			 * - Component now subscribes to session-specific atoms
+			 *
 			 * VERIFICATION:
 			 * - Component must NOT import useOpencodeStore
 			 * - Component must NOT call hydrateMessages
-			 * - Component MUST use reactive World Stream hooks
+			 * - Component MUST use reactive World Stream hooks (useSession)
 			 */
 
 			// Read the source file to verify imports
@@ -48,14 +52,57 @@ describe("SessionMessages", () => {
 			expect(source).not.toContain("hydrateMessages")
 			expect(source).not.toContain("useEffect") // No manual hydration effects
 
-			// MUST import from reactive hooks
-			expect(source).toContain("useMessagesWithParts")
-			expect(source).toContain("useSessionStatus")
-			expect(source).toContain('from "@/app/hooks"')
+			// MUST import from reactive hooks (Phase 3: now useSessionAtom)
+			expect(source).toContain("useSessionAtom")
+			expect(source).toContain('from "@opencode-vibe/react"')
 
 			// MUST use World Stream hooks directly (no registry access)
 			expect(source).not.toContain("getWorldRegistry")
 			expect(source).not.toContain("Registry.get")
+		})
+	})
+
+	describe("SessionAtom integration (ADR-019 Phase 3 - opencode-next--xts0a-mk4fgz7m4k9)", () => {
+		test("component uses useSession() for per-session messages, not global useMessagesWithParts", async () => {
+			/**
+			 * Test for ADR-019 Phase 3: MessageList uses session.messages from useSessionAtom
+			 *
+			 * GOAL:
+			 * - SessionMessages subscribes to per-session messages via useSession(sessionId)
+			 * - Eliminates global messages lookup (useMessagesWithParts filters by sessionId)
+			 * - Component only re-renders when ITS session's messages change
+			 *
+			 * BEFORE (Phase 2):
+			 * - useMessagesWithParts(sessionId) → queries global messagesAtom + partsAtom
+			 * - Every message update triggers filtering logic
+			 * - Component re-renders even if another session's messages changed
+			 *
+			 * AFTER (Phase 3):
+			 * - useSession(sessionId) → subscribes to per-session enrichedSessionAtom
+			 * - Returns { session, messages, parts, status, isActive }
+			 * - Component only re-renders when THIS session changes
+			 *
+			 * VERIFICATION:
+			 * - Component MUST import useSession from @opencode-vibe/react
+			 * - Component MUST NOT use useMessagesWithParts (global lookup)
+			 * - Component MUST destructure messages from useSession result
+			 */
+
+			// Read the source file to verify imports
+			const fs = await import("node:fs/promises")
+			const path = await import("node:path")
+			const filePath = path.join(__dirname, "session-messages.tsx")
+			const source = await fs.readFile(filePath, "utf-8")
+
+			// MUST import useSessionAtom from @opencode-vibe/react
+			expect(source).toContain('from "@opencode-vibe/react"')
+			expect(source).toContain("useSessionAtom")
+
+			// MUST NOT use global useMessagesWithParts
+			expect(source).not.toContain("useMessagesWithParts")
+
+			// MUST call useSessionAtom with sessionId
+			expect(source).toContain("useSessionAtom(sessionId)")
 		})
 	})
 	describe("MessageRenderer memo comparison", () => {

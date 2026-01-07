@@ -25,8 +25,8 @@
 import {
 	useWorld,
 	useWorldConnection,
-	useWorldSession,
 	useWorldMessages,
+	useSessionAtom,
 	type ConnectionStatus,
 } from "@opencode-vibe/react"
 import { useState } from "react"
@@ -133,13 +133,19 @@ function SessionList({ onSelectSession }: { onSelectSession: (id: string) => voi
 }
 
 /**
- * Session detail view using useWorldSession
+ * Session detail view using useSessionAtom (ADR-019 Phase 3)
+ *
+ * Uses granular per-session subscription (SessionAtom) instead of global world state.
+ * Only re-renders when THIS session changes, not when other sessions update.
+ *
+ * BEFORE: useWorldSession(sessionId) - subscribed to world.sessions array
+ * AFTER: useSessionAtom(sessionId) - subscribes directly to SessionAtom for this ID
  */
 function SessionDetail({ sessionId }: { sessionId: string }) {
-	const session = useWorldSession(sessionId)
+	const session = useSessionAtom(sessionId)
 	const messages = useWorldMessages(sessionId)
 
-	if (!session) {
+	if (!session || !session.id) {
 		return <div className="text-muted-foreground text-sm">Session not found: {sessionId}</div>
 	}
 
