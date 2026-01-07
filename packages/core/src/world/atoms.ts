@@ -7,7 +7,7 @@
 
 import { Atom } from "@effect-atom/atom"
 import * as Registry from "@effect-atom/atom/Registry"
-import { Effect, Metric } from "effect"
+import { Duration, Effect, Metric } from "effect"
 import type { Message, Part, Session } from "../types/domain.js"
 import type { SessionStatus } from "../types/events.js"
 import type { Project } from "../types/sdk.js"
@@ -45,22 +45,30 @@ interface WorldStateData {
 /**
  * Sessions atom - Map for O(1) lookup by session ID
  */
-export const sessionsAtom = Atom.make(new Map<string, Session>()).pipe(Atom.keepAlive)
+export const sessionsAtom = Atom.make(new Map<string, Session>()).pipe(
+	Atom.setIdleTTL(Duration.minutes(5)),
+)
 
 /**
  * Messages atom - Map of message ID to Message
  */
-export const messagesAtom = Atom.make(new Map<string, Message>()).pipe(Atom.keepAlive)
+export const messagesAtom = Atom.make(new Map<string, Message>()).pipe(
+	Atom.setIdleTTL(Duration.minutes(5)),
+)
 
 /**
  * Parts atom - Map of part ID to Part
  */
-export const partsAtom = Atom.make(new Map<string, Part>()).pipe(Atom.keepAlive)
+export const partsAtom = Atom.make(new Map<string, Part>()).pipe(
+	Atom.setIdleTTL(Duration.minutes(5)),
+)
 
 /**
  * Status atom - Map of session ID to SessionStatus
  */
-export const statusAtom = Atom.make(new Map<string, SessionStatus>()).pipe(Atom.keepAlive)
+export const statusAtom = Atom.make(new Map<string, SessionStatus>()).pipe(
+	Atom.setIdleTTL(Duration.minutes(5)),
+)
 
 /**
  * Connection status atom
@@ -82,7 +90,9 @@ export const projectsAtom = Atom.make(new Map<string, Project>()).pipe(Atom.keep
 /**
  * Session to instance port mapping for routing
  */
-export const sessionToInstancePortAtom = Atom.make(new Map<string, number>()).pipe(Atom.keepAlive)
+export const sessionToInstancePortAtom = Atom.make(new Map<string, number>()).pipe(
+	Atom.setIdleTTL(Duration.minutes(5)),
+)
 
 /**
  * Derived atom - session count
@@ -380,3 +390,13 @@ function deriveWorldStateFromData(data: WorldStateData): WorldState {
  * Re-export Registry for convenience
  */
 export { Atom, Registry }
+
+/**
+ * Re-export SessionAtom infrastructure (ADR-019 Phase 2)
+ */
+export {
+	type SessionAtom,
+	getOrCreateSessionAtom,
+	sessionAtomRegistry,
+	clearSessionAtomRegistry,
+} from "./session-atom.js"

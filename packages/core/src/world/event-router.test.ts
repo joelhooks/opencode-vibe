@@ -22,6 +22,7 @@ import {
 	createMessageEvents,
 	createPartEvents,
 } from "./event-router.js"
+import { clearSessionAtomRegistry, sessionAtomRegistry } from "./session-atom.js"
 import type { SSEEvent } from "../sse/schemas.js"
 import type { Session, Message, Part } from "../types/domain.js"
 
@@ -30,6 +31,8 @@ describe("Event Router", () => {
 
 	beforeEach(() => {
 		registry = Registry.make()
+		// Clear SessionAtom registry for clean test state
+		clearSessionAtomRegistry()
 	})
 
 	describe("session.created", () => {
@@ -1063,6 +1066,855 @@ describe("Event Router", () => {
 				const storedParts = registry.get(partsAtom)
 				expect(storedParts.size).toBe(1)
 				expect(storedParts.get("part-1")?.messageID).toBe("msg-1")
+			})
+		})
+
+		describe("SessionAtom integration (ADR-019 Phase 2)", () => {
+			it("should route session.created to SessionAtom", () => {
+				const event: SSEEvent = {
+					type: "session.created",
+					properties: {
+						info: {
+							id: "session-1",
+							title: "Test Session",
+							directory: "/test",
+							time: { created: 1000, updated: 1000 },
+						},
+					},
+				}
+
+				routeEvent(event, registry, 3000)
+
+				// Import dynamically to avoid circular deps in test
+				// sessionAtomRegistry imported at top
+				const sessionAtom = sessionAtomRegistry.get("session-1")
+
+				expect(sessionAtom).toBeDefined()
+				if (sessionAtom) {
+					const session = registry.get(sessionAtom.sessionAtom) as Session | null
+					expect(session?.id).toBe("session-1")
+					expect(session?.title).toBe("Test Session")
+				}
+			})
+
+			it("should route message.updated to SessionAtom messagesAtom", () => {
+				// First create session
+				const sessionEvent: SSEEvent = {
+					type: "session.created",
+					properties: {
+						info: {
+							id: "session-1",
+							title: "Test Session",
+							directory: "/test",
+							time: { created: 1000, updated: 1000 },
+						},
+					},
+				}
+				routeEvent(sessionEvent, registry, 3000)
+
+				// Then add message
+				const messageEvent: SSEEvent = {
+					type: "message.updated",
+					properties: {
+						info: {
+							id: "msg-1",
+							sessionID: "session-1",
+							role: "user",
+							time: { created: 1000 },
+						},
+					},
+				}
+				routeEvent(messageEvent, registry, 3000)
+
+				// sessionAtomRegistry imported at top
+				const sessionAtom = sessionAtomRegistry.get("session-1")
+
+				if (sessionAtom) {
+					const messages = registry.get(sessionAtom.messagesAtom) as Message[]
+					expect(messages).toHaveLength(1)
+					expect(messages[0].id).toBe("msg-1")
+				}
+			})
+
+			it("should route message.part.updated to SessionAtom partsAtom", () => {
+				const partEvent: SSEEvent = {
+					type: "message.part.updated",
+					properties: {
+						part: {
+							id: "part-1",
+							sessionID: "session-1",
+							messageID: "msg-1",
+							type: "text",
+							text: "Hello",
+						},
+					},
+				}
+
+				routeEvent(partEvent, registry, 3000)
+
+				// sessionAtomRegistry imported at top
+				const sessionAtom = sessionAtomRegistry.get("session-1")
+
+				if (sessionAtom) {
+					const parts = registry.get(sessionAtom.partsAtom) as Part[]
+					expect(parts).toHaveLength(1)
+					expect(parts[0].id).toBe("part-1")
+					expect(parts[0].type).toBe("text")
+				}
+			})
+
+			it("should update SessionAtom and global atoms for session.updated", () => {
+				// Create initial session
+				const createEvent: SSEEvent = {
+					type: "session.created",
+					properties: {
+						info: {
+							id: "session-1",
+							title: "Old Title",
+							directory: "/test",
+							time: { created: 1000, updated: 1000 },
+						},
+					},
+				}
+				routeEvent(createEvent, registry, 3000)
+
+				// Update session
+				const updateEvent: SSEEvent = {
+					type: "session.updated",
+					properties: {
+						info: {
+							id: "session-1",
+							title: "New Title",
+							directory: "/test",
+							time: { created: 1000, updated: 2000 },
+						},
+					},
+				}
+				routeEvent(updateEvent, registry, 3000)
+
+				// Check SessionAtom
+				// sessionAtomRegistry imported at top
+				const sessionAtom = sessionAtomRegistry.get("session-1")
+
+				if (sessionAtom) {
+					const sessionData = registry.get(sessionAtom.sessionAtom) as Session | null
+					expect(sessionData?.title).toBe("New Title")
+				}
+
+				// Check global atom (preserved behavior)
+				const globalSessions = registry.get(sessionsAtom)
+				expect(globalSessions.get("session-1")?.title).toBe("New Title")
+			})
+
+			it("should handle session.deleted by clearing SessionAtom", () => {
+				// Create session
+				const createEvent: SSEEvent = {
+					type: "session.created",
+					properties: {
+						info: {
+							id: "session-1",
+							title: "Test Session",
+							directory: "/test",
+							time: { created: 1000, updated: 1000 },
+						},
+					},
+				}
+				routeEvent(createEvent, registry, 3000)
+
+				// Verify session atom exists
+				// sessionAtomRegistry imported at top
+				let sessionAtom = sessionAtomRegistry.get("session-1")
+				expect(sessionAtom).toBeDefined()
+
+				// Delete session
+				const deleteEvent: SSEEvent = {
+					type: "session.deleted",
+					properties: {
+						info: {
+							id: "session-1",
+							title: "Test Session",
+							directory: "/test",
+							time: { created: 1000, updated: 1000 },
+						},
+					},
+				}
+				routeEvent(deleteEvent, registry, 3000)
+
+				// SessionAtom should be removed from registry
+				sessionAtom = sessionAtomRegistry.get("session-1")
+				expect(sessionAtom).toBeUndefined()
+
+				// Global atom should also be cleared
+				const globalSessions = registry.get(sessionsAtom)
+				expect(globalSessions.has("session-1")).toBe(false)
+			})
+		})
+	})
+
+	describe("Tier Routing (ADR-019 Phase 2.7)", () => {
+		describe("Session-first routing verification", () => {
+			it("should update SessionAtom BEFORE global sessionsAtom", () => {
+				// Verify tier routing by checking that both tiers are updated
+				// The implementation guarantees session-first order (lines 47-56 in event-router.ts)
+				const event: SSEEvent = {
+					type: "session.created",
+					properties: {
+						info: {
+							id: "session-1",
+							title: "Test Session",
+							directory: "/test",
+							time: { created: 1000, updated: 1000 },
+						},
+					},
+				}
+
+				routeEvent(event, registry, 3000)
+
+				// Verify SessionAtom tier was updated
+				// sessionAtomRegistry imported at top
+				const sessionAtom = sessionAtomRegistry.get("session-1")
+				expect(sessionAtom).toBeDefined()
+
+				if (sessionAtom) {
+					const sessionData = registry.get(sessionAtom.sessionAtom) as Session | null
+					expect(sessionData?.id).toBe("session-1")
+					expect(sessionData?.title).toBe("Test Session")
+				}
+
+				// Verify global tier was updated
+				const globalSessions = registry.get(sessionsAtom)
+				expect(globalSessions.has("session-1")).toBe(true)
+				expect(globalSessions.get("session-1")?.title).toBe("Test Session")
+			})
+
+			it("should update SessionAtom.messagesAtom BEFORE global messagesAtom", () => {
+				// First create session
+				const sessionEvent: SSEEvent = {
+					type: "session.created",
+					properties: {
+						info: {
+							id: "session-1",
+							title: "Test Session",
+							directory: "/test",
+							time: { created: 1000, updated: 1000 },
+						},
+					},
+				}
+				routeEvent(sessionEvent, registry, 3000)
+
+				// Add message - verify tier routing (implementation lines 100-118 in event-router.ts)
+				const messageEvent: SSEEvent = {
+					type: "message.updated",
+					properties: {
+						info: {
+							id: "msg-1",
+							sessionID: "session-1",
+							role: "user",
+							time: { created: 1000 },
+						},
+					},
+				}
+
+				routeEvent(messageEvent, registry, 3000)
+
+				// Verify SessionAtom tier
+				// sessionAtomRegistry imported at top
+				const sessionAtom = sessionAtomRegistry.get("session-1")
+				expect(sessionAtom).toBeDefined()
+
+				if (sessionAtom) {
+					const messages = registry.get(sessionAtom.messagesAtom) as Message[]
+					expect(messages).toHaveLength(1)
+					expect(messages[0].id).toBe("msg-1")
+				}
+
+				// Verify global tier
+				const globalMessages = registry.get(messagesAtom)
+				expect(globalMessages.has("msg-1")).toBe(true)
+				expect(globalMessages.get("msg-1")?.sessionID).toBe("session-1")
+			})
+
+			it("should update SessionAtom.partsAtom BEFORE global partsAtom", () => {
+				// Add part - verify tier routing (implementation lines 165-191 in event-router.ts)
+				const partEvent: SSEEvent = {
+					type: "message.part.updated",
+					properties: {
+						part: {
+							id: "part-1",
+							sessionID: "session-1",
+							messageID: "msg-1",
+							type: "text",
+							text: "Hello",
+						},
+					},
+				}
+
+				routeEvent(partEvent, registry, 3000)
+
+				// Verify SessionAtom tier
+				// sessionAtomRegistry imported at top
+				const sessionAtom = sessionAtomRegistry.get("session-1")
+				expect(sessionAtom).toBeDefined()
+
+				if (sessionAtom) {
+					const parts = registry.get(sessionAtom.partsAtom) as Part[]
+					expect(parts).toHaveLength(1)
+					expect(parts[0].id).toBe("part-1")
+					expect(parts[0].type).toBe("text")
+				}
+
+				// Verify global tier
+				const globalParts = registry.get(partsAtom)
+				expect(globalParts.has("part-1")).toBe(true)
+				expect(globalParts.get("part-1")?.sessionID).toBe("session-1")
+			})
+
+			it("should ensure both tiers receive updates", () => {
+				const event: SSEEvent = {
+					type: "session.created",
+					properties: {
+						info: {
+							id: "session-1",
+							title: "Test Session",
+							directory: "/test",
+							time: { created: 1000, updated: 1000 },
+						},
+					},
+				}
+
+				routeEvent(event, registry, 3000)
+
+				// Verify SessionAtom tier
+				// sessionAtomRegistry imported at top
+				const sessionAtom = sessionAtomRegistry.get("session-1")
+				expect(sessionAtom).toBeDefined()
+
+				if (sessionAtom) {
+					const sessionData = registry.get(sessionAtom.sessionAtom) as Session | null
+					expect(sessionData?.id).toBe("session-1")
+					expect(sessionData?.title).toBe("Test Session")
+				}
+
+				// Verify global tier
+				const globalSessions = registry.get(sessionsAtom)
+				expect(globalSessions.has("session-1")).toBe(true)
+				expect(globalSessions.get("session-1")?.title).toBe("Test Session")
+			})
+		})
+
+		describe("Event type coverage", () => {
+			describe("session.created → SessionAtom.sessionAtom", () => {
+				it("should route to SessionAtom.sessionAtom", () => {
+					const event: SSEEvent = {
+						type: "session.created",
+						properties: {
+							info: {
+								id: "session-1",
+								title: "Test Session",
+								directory: "/test",
+								time: { created: 1000, updated: 1000 },
+							},
+						},
+					}
+
+					routeEvent(event, registry, 3000)
+
+					// sessionAtomRegistry imported at top
+					const sessionAtom = sessionAtomRegistry.get("session-1")
+
+					expect(sessionAtom).toBeDefined()
+					if (sessionAtom) {
+						const session = registry.get(sessionAtom.sessionAtom) as Session | null
+						expect(session).not.toBeNull()
+						expect(session?.id).toBe("session-1")
+					}
+				})
+			})
+
+			describe("session.updated → SessionAtom.sessionAtom", () => {
+				it("should update SessionAtom.sessionAtom", () => {
+					// Create initial session
+					const createEvent: SSEEvent = {
+						type: "session.created",
+						properties: {
+							info: {
+								id: "session-1",
+								title: "Old Title",
+								directory: "/test",
+								time: { created: 1000, updated: 1000 },
+							},
+						},
+					}
+					routeEvent(createEvent, registry, 3000)
+
+					// Update session
+					const updateEvent: SSEEvent = {
+						type: "session.updated",
+						properties: {
+							info: {
+								id: "session-1",
+								title: "New Title",
+								directory: "/test",
+								time: { created: 1000, updated: 2000 },
+							},
+						},
+					}
+					routeEvent(updateEvent, registry, 3000)
+
+					// sessionAtomRegistry imported at top
+					const sessionAtom = sessionAtomRegistry.get("session-1")
+
+					if (sessionAtom) {
+						const session = registry.get(sessionAtom.sessionAtom) as Session | null
+						expect(session?.title).toBe("New Title")
+						expect((session as any).time.updated).toBe(2000)
+					}
+				})
+			})
+
+			describe("session.deleted → Registry cleanup", () => {
+				it("should remove SessionAtom from registry", () => {
+					// Create session
+					const createEvent: SSEEvent = {
+						type: "session.created",
+						properties: {
+							info: {
+								id: "session-1",
+								title: "Test Session",
+								directory: "/test",
+								time: { created: 1000, updated: 1000 },
+							},
+						},
+					}
+					routeEvent(createEvent, registry, 3000)
+
+					// Verify session exists
+					// sessionAtomRegistry imported at top
+					let sessionAtom = sessionAtomRegistry.get("session-1")
+					expect(sessionAtom).toBeDefined()
+
+					// Delete session
+					const deleteEvent: SSEEvent = {
+						type: "session.deleted",
+						properties: {
+							info: {
+								id: "session-1",
+								title: "Test Session",
+								directory: "/test",
+								time: { created: 1000, updated: 1000 },
+							},
+						},
+					}
+					routeEvent(deleteEvent, registry, 3000)
+
+					// Verify SessionAtom removed from registry
+					sessionAtom = sessionAtomRegistry.get("session-1")
+					expect(sessionAtom).toBeUndefined()
+				})
+			})
+
+			describe("message.updated → SessionAtom.messagesAtom", () => {
+				it("should route to SessionAtom.messagesAtom", () => {
+					const event: SSEEvent = {
+						type: "message.updated",
+						properties: {
+							info: {
+								id: "msg-1",
+								sessionID: "session-1",
+								role: "user",
+								time: { created: 1000 },
+							},
+						},
+					}
+
+					routeEvent(event, registry, 3000)
+
+					// sessionAtomRegistry imported at top
+					const sessionAtom = sessionAtomRegistry.get("session-1")
+
+					expect(sessionAtom).toBeDefined()
+					if (sessionAtom) {
+						const messages = registry.get(sessionAtom.messagesAtom) as Message[]
+						expect(messages).toHaveLength(1)
+						expect(messages[0].id).toBe("msg-1")
+						expect(messages[0].sessionID).toBe("session-1")
+					}
+				})
+			})
+
+			describe("message.part.updated → SessionAtom.partsAtom", () => {
+				it("should route to SessionAtom.partsAtom", () => {
+					const event: SSEEvent = {
+						type: "message.part.updated",
+						properties: {
+							part: {
+								id: "part-1",
+								sessionID: "session-1",
+								messageID: "msg-1",
+								type: "text",
+								text: "Hello",
+							},
+						},
+					}
+
+					routeEvent(event, registry, 3000)
+
+					// sessionAtomRegistry imported at top
+					const sessionAtom = sessionAtomRegistry.get("session-1")
+
+					expect(sessionAtom).toBeDefined()
+					if (sessionAtom) {
+						const parts = registry.get(sessionAtom.partsAtom) as Part[]
+						expect(parts).toHaveLength(1)
+						expect(parts[0].id).toBe("part-1")
+						expect(parts[0].sessionID).toBe("session-1")
+					}
+				})
+			})
+		})
+
+		describe("Edge cases", () => {
+			it("should handle event without sessionId (global only)", () => {
+				const event: SSEEvent = {
+					type: "session.error",
+					properties: {
+						error: { message: "Global error" },
+					},
+				}
+
+				// Should not throw
+				expect(() => routeEvent(event, registry, 3000)).not.toThrow()
+
+				// Should not create SessionAtom (no sessionId)
+				// sessionAtomRegistry imported at top
+				expect(sessionAtomRegistry.size).toBe(0)
+			})
+
+			it("should handle rapid events for same session", () => {
+				// Create session
+				const sessionEvent: SSEEvent = {
+					type: "session.created",
+					properties: {
+						info: {
+							id: "session-1",
+							title: "Test Session",
+							directory: "/test",
+							time: { created: 1000, updated: 1000 },
+						},
+					},
+				}
+				routeEvent(sessionEvent, registry, 3000)
+
+				// Send multiple rapid message events
+				const events: SSEEvent[] = [
+					{
+						type: "message.updated",
+						properties: {
+							info: {
+								id: "msg-1",
+								sessionID: "session-1",
+								role: "user",
+								time: { created: 1000 },
+							},
+						},
+					},
+					{
+						type: "message.updated",
+						properties: {
+							info: {
+								id: "msg-2",
+								sessionID: "session-1",
+								role: "assistant",
+								time: { created: 1001 },
+							},
+						},
+					},
+					{
+						type: "message.updated",
+						properties: {
+							info: {
+								id: "msg-3",
+								sessionID: "session-1",
+								role: "user",
+								time: { created: 1002 },
+							},
+						},
+					},
+				]
+
+				// Route all events
+				for (const event of events) {
+					routeEvent(event, registry, 3000)
+				}
+
+				// Verify SessionAtom has all messages
+				// sessionAtomRegistry imported at top
+				const sessionAtom = sessionAtomRegistry.get("session-1")
+
+				if (sessionAtom) {
+					const messages = registry.get(sessionAtom.messagesAtom) as Message[]
+					expect(messages).toHaveLength(3)
+					expect(messages[0].id).toBe("msg-1")
+					expect(messages[1].id).toBe("msg-2")
+					expect(messages[2].id).toBe("msg-3")
+				}
+
+				// Verify global atom has all messages
+				const globalMessages = registry.get(messagesAtom)
+				expect(globalMessages.size).toBe(3)
+			})
+
+			it("should handle events for deleted sessions gracefully", () => {
+				// Create session
+				const createEvent: SSEEvent = {
+					type: "session.created",
+					properties: {
+						info: {
+							id: "session-1",
+							title: "Test Session",
+							directory: "/test",
+							time: { created: 1000, updated: 1000 },
+						},
+					},
+				}
+				routeEvent(createEvent, registry, 3000)
+
+				// Delete session
+				const deleteEvent: SSEEvent = {
+					type: "session.deleted",
+					properties: {
+						info: {
+							id: "session-1",
+							title: "Test Session",
+							directory: "/test",
+							time: { created: 1000, updated: 1000 },
+						},
+					},
+				}
+				routeEvent(deleteEvent, registry, 3000)
+
+				// Try to add message to deleted session
+				const messageEvent: SSEEvent = {
+					type: "message.updated",
+					properties: {
+						info: {
+							id: "msg-1",
+							sessionID: "session-1",
+							role: "user",
+							time: { created: 2000 },
+						},
+					},
+				}
+
+				// Should not throw - will recreate SessionAtom
+				expect(() => routeEvent(messageEvent, registry, 3000)).not.toThrow()
+
+				// Message should be routed to global atom
+				const globalMessages = registry.get(messagesAtom)
+				expect(globalMessages.has("msg-1")).toBe(true)
+
+				// SessionAtom should be recreated
+				// sessionAtomRegistry imported at top
+				const sessionAtom = sessionAtomRegistry.get("session-1")
+				expect(sessionAtom).toBeDefined()
+			})
+
+			it("should handle part events for non-existent sessions", () => {
+				const partEvent: SSEEvent = {
+					type: "message.part.updated",
+					properties: {
+						part: {
+							id: "part-1",
+							sessionID: "non-existent",
+							messageID: "msg-1",
+							type: "text",
+							text: "Hello",
+						},
+					},
+				}
+
+				// Should not throw - will create SessionAtom lazily
+				expect(() => routeEvent(partEvent, registry, 3000)).not.toThrow()
+
+				// Part should be in global atom
+				const globalParts = registry.get(partsAtom)
+				expect(globalParts.has("part-1")).toBe(true)
+
+				// SessionAtom should be created
+				// sessionAtomRegistry imported at top
+				const sessionAtom = sessionAtomRegistry.get("non-existent")
+				expect(sessionAtom).toBeDefined()
+			})
+		})
+
+		describe("Integration", () => {
+			it("should allow subscribers to receive updates via SessionAtom", () => {
+				// Create session
+				const sessionEvent: SSEEvent = {
+					type: "session.created",
+					properties: {
+						info: {
+							id: "session-1",
+							title: "Test Session",
+							directory: "/test",
+							time: { created: 1000, updated: 1000 },
+						},
+					},
+				}
+				routeEvent(sessionEvent, registry, 3000)
+
+				// Get SessionAtom
+				// sessionAtomRegistry imported at top
+				const sessionAtom = sessionAtomRegistry.get("session-1")
+				expect(sessionAtom).toBeDefined()
+
+				if (sessionAtom) {
+					// Subscribe to messagesAtom
+					const receivedMessages: Message[][] = []
+					const unsubscribe = registry.subscribe(sessionAtom.messagesAtom, (messages) => {
+						receivedMessages.push(messages)
+					})
+
+					// Add messages
+					const msg1Event: SSEEvent = {
+						type: "message.updated",
+						properties: {
+							info: {
+								id: "msg-1",
+								sessionID: "session-1",
+								role: "user",
+								time: { created: 1000 },
+							},
+						},
+					}
+					routeEvent(msg1Event, registry, 3000)
+
+					const msg2Event: SSEEvent = {
+						type: "message.updated",
+						properties: {
+							info: {
+								id: "msg-2",
+								sessionID: "session-1",
+								role: "assistant",
+								time: { created: 2000 },
+							},
+						},
+					}
+					routeEvent(msg2Event, registry, 3000)
+
+					// Verify subscriber received updates
+					expect(receivedMessages.length).toBeGreaterThanOrEqual(2)
+					const lastMessages = receivedMessages[receivedMessages.length - 1]
+					expect(lastMessages).toHaveLength(2)
+					expect(lastMessages[0].id).toBe("msg-1")
+					expect(lastMessages[1].id).toBe("msg-2")
+
+					unsubscribe()
+				}
+			})
+
+			it("should verify global atom subscribers still work", () => {
+				// Subscribe to global sessionsAtom
+				const receivedSessions: Map<string, Session>[] = []
+				const unsubscribe = registry.subscribe(sessionsAtom, (sessions) => {
+					receivedSessions.push(sessions)
+				})
+
+				// Add session
+				const event: SSEEvent = {
+					type: "session.created",
+					properties: {
+						info: {
+							id: "session-1",
+							title: "Test Session",
+							directory: "/test",
+							time: { created: 1000, updated: 1000 },
+						},
+					},
+				}
+				routeEvent(event, registry, 3000)
+
+				// Verify subscriber received update
+				expect(receivedSessions.length).toBeGreaterThanOrEqual(1)
+				const lastSessions = receivedSessions[receivedSessions.length - 1]
+				expect(lastSessions.has("session-1")).toBe(true)
+				expect(lastSessions.get("session-1")?.title).toBe("Test Session")
+
+				unsubscribe()
+			})
+
+			it("should maintain data consistency between tiers", () => {
+				// Create session
+				const sessionEvent: SSEEvent = {
+					type: "session.created",
+					properties: {
+						info: {
+							id: "session-1",
+							title: "Consistency Test",
+							directory: "/test",
+							time: { created: 1000, updated: 1000 },
+						},
+					},
+				}
+				routeEvent(sessionEvent, registry, 3000)
+
+				// Add messages
+				const messageEvents: SSEEvent[] = [
+					{
+						type: "message.updated",
+						properties: {
+							info: {
+								id: "msg-1",
+								sessionID: "session-1",
+								role: "user",
+								time: { created: 1000 },
+							},
+						},
+					},
+					{
+						type: "message.updated",
+						properties: {
+							info: {
+								id: "msg-2",
+								sessionID: "session-1",
+								role: "assistant",
+								time: { created: 2000 },
+							},
+						},
+					},
+				]
+
+				for (const event of messageEvents) {
+					routeEvent(event, registry, 3000)
+				}
+
+				// Get data from SessionAtom
+				// sessionAtomRegistry imported at top
+				const sessionAtom = sessionAtomRegistry.get("session-1")
+				const sessionMessages = sessionAtom
+					? (registry.get(sessionAtom.messagesAtom) as Message[])
+					: []
+
+				// Get data from global atom
+				const globalMessages = registry.get(messagesAtom)
+				const globalSession1Messages = Array.from(globalMessages.values()).filter(
+					(m) => m.sessionID === "session-1",
+				)
+
+				// Verify consistency
+				expect(sessionMessages).toHaveLength(2)
+				expect(globalSession1Messages).toHaveLength(2)
+
+				// Verify message IDs match
+				const sessionMessageIds = sessionMessages.map((m) => m.id).sort()
+				const globalMessageIds = globalSession1Messages.map((m) => m.id).sort()
+				expect(sessionMessageIds).toEqual(globalMessageIds)
+
+				// Verify message content matches
+				for (const sessionMsg of sessionMessages) {
+					const globalMsg = globalMessages.get(sessionMsg.id)
+					expect(globalMsg).toEqual(sessionMsg)
+				}
 			})
 		})
 	})

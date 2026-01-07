@@ -16,7 +16,7 @@
  * - Graceful degradation when sources unavailable
  */
 
-import { Effect, Stream, pipe, Scope, Exit } from "effect"
+import { Effect, Stream, pipe, Scope, Exit, Duration } from "effect"
 import type { EventSource, SourceEvent } from "./event-source.js"
 import type { WorldStreamConfig, WorldStreamHandle, WorldState } from "./types.js"
 import {
@@ -120,7 +120,17 @@ export function createMergedWorldStream(config: MergedStreamConfig = {}): Merged
 	} = config
 
 	// Use injected registry (for testing) or create a new one
-	const registry = injectedRegistry || Registry.make()
+	// Configure defaultIdleTTL based on environment:
+	// - Server (SSR): undefined (no timers - atoms are short-lived per-request)
+	// - Client: 5 minutes (cleanup idle atoms after inactivity)
+	const registry =
+		injectedRegistry ||
+		Registry.make({
+			defaultIdleTTL:
+				typeof window === "undefined"
+					? undefined // No TTL on server (no timers)
+					: Duration.toMillis(Duration.minutes(5)), // 5 min on client
+		})
 
 	// CRITICAL: Mount worldStateAtom to keep it reactive
 	// From Hivemind mem-f081811ec795ff2a: "Use r.mount() which keeps atoms alive while mounted"

@@ -25,7 +25,7 @@
  * ```
  */
 
-import { Metric, MetricBoundaries } from "effect"
+import { Effect, Metric, MetricBoundaries } from "effect"
 
 // Pre-define metrics to avoid TypeScript inference issues with complex Effect types
 const sseConnectionsActive = Metric.gauge("sse_connections_active")
@@ -48,6 +48,11 @@ const eventProcessingSeconds = Metric.histogram(
 )
 const swarmDbPollSeconds = Metric.histogram("swarmdb_poll_seconds", eventProcessingBoundaries)
 const cursorQuerySeconds = Metric.histogram("cursor_query_seconds", eventProcessingBoundaries)
+
+// Pre-define atom subscription metrics
+const atomSubscriptionsActive = Metric.gauge("atom_subscriptions_active")
+const atomCreationsTotal = Metric.counter("atom_creations_total")
+const atomDisposalsTotal = Metric.counter("atom_disposals_total")
 
 /**
  * WorldMetrics - Centralized metrics for the world layer
@@ -85,6 +90,23 @@ export const WorldMetrics = {
 	 * Use for: User activity monitoring, capacity planning
 	 */
 	worldSessionsActive,
+
+	/**
+	 * atom_subscriptions_active - Number of active atom subscriptions
+	 *
+	 * Tracks current subscription count per atom tier.
+	 * Add labels at call site with Metric.tagged:
+	 *
+	 * ```typescript
+	 * Metric.set(WorldMetrics.atomSubscriptionsActive.pipe(
+	 *   Metric.tagged("tier", "session"),
+	 *   Metric.tagged("atom_id", "sessionsAtom")
+	 * ), subscriptionCount)
+	 * ```
+	 *
+	 * Use for: Memory leak detection, idleTTL debugging, atom lifecycle monitoring
+	 */
+	atomSubscriptionsActive,
 
 	// ============================================================================
 	// COUNTERS - Cumulative counts (monotonically increasing)
@@ -146,6 +168,41 @@ export const WorldMetrics = {
 	 */
 	cursorOperationsTotal,
 
+	/**
+	 * atom_creations_total - Total atom creations
+	 *
+	 * Tracks cumulative atom creation count by tier.
+	 * Add labels at call site with Metric.tagged:
+	 *
+	 * ```typescript
+	 * Metric.increment(WorldMetrics.atomCreationsTotal.pipe(
+	 *   Metric.tagged("tier", "session"),
+	 *   Metric.tagged("atom_id", "sessionsAtom")
+	 * ))
+	 * ```
+	 *
+	 * Use for: Atom lifecycle monitoring, memory allocation tracking
+	 */
+	atomCreationsTotal,
+
+	/**
+	 * atom_disposals_total - Total atom disposals
+	 *
+	 * Tracks cumulative atom disposal count by tier.
+	 * Add labels at call site with Metric.tagged:
+	 *
+	 * ```typescript
+	 * Metric.increment(WorldMetrics.atomDisposalsTotal.pipe(
+	 *   Metric.tagged("tier", "session"),
+	 *   Metric.tagged("atom_id", "sessionsAtom"),
+	 *   Metric.tagged("reason", "idle_ttl")
+	 * ))
+	 * ```
+	 *
+	 * Use for: idleTTL effectiveness, memory cleanup validation
+	 */
+	atomDisposalsTotal,
+
 	// ============================================================================
 	// HISTOGRAMS - Value distributions
 	// ============================================================================
@@ -188,3 +245,187 @@ export const WorldMetrics = {
 	 */
 	cursorQuerySeconds,
 } as const
+
+// ============================================================================
+// ATOM METRICS TRACKING
+// ============================================================================
+
+/**
+ * Atom tier classification for metrics
+ *
+ * - session: Atoms with idleTTL (sessionsAtom, messagesAtom, partsAtom, statusAtom, sessionToInstancePortAtom)
+ * - global: Atoms with keepAlive (connectionStatusAtom, instancesAtom, projectsAtom, sessionCountAtom, worldStateAtom)
+ */
+export type AtomTier = "session" | "global"
+
+/**
+ * Atom lifecycle event for tracking
+ */
+export interface AtomLifecycleEvent {
+	/** Atom identifier (e.g., "sessionsAtom") */
+	atomId: string
+	/** Atom tier classification */
+	tier: AtomTier
+	/** Event type */
+	event: "created" | "subscribed" | "unsubscribed" | "disposed"
+	/** Current subscription count after event */
+	subscriptionCount: number
+	/** Timestamp of event */
+	timestamp: Date
+	/** Optional disposal reason */
+	reason?: "idle_ttl" | "manual"
+}
+
+/**
+ * Atom metrics snapshot for debugging
+ */
+export interface AtomMetrics {
+	atomId: string
+	tier: AtomTier
+	subscriptionCount: number
+	createdAt: Date
+	lastAccessedAt: Date
+}
+
+/**
+ * Internal registry of atom metrics
+ */
+const atomMetricsRegistry = new Map<string, AtomMetrics>()
+
+/**
+ * Track atom lifecycle event
+ *
+ * Updates internal metrics registry and increments Prometheus metrics.
+ * In development, also logs to console.
+ *
+ * @param event - Atom lifecycle event to track
+ *
+ * @example
+ * ```typescript
+ * trackAtomLifecycle({
+ *   atomId: "sessionsAtom",
+ *   tier: "session",
+ *   event: "subscribed",
+ *   subscriptionCount: 1,
+ *   timestamp: new Date()
+ * })
+ * ```
+ */
+export function trackAtomLifecycle(event: AtomLifecycleEvent): void {
+	const { atomId, tier, event: eventType, subscriptionCount, timestamp, reason } = event
+
+	// Update internal registry
+	if (eventType === "created") {
+		atomMetricsRegistry.set(atomId, {
+			atomId,
+			tier,
+			subscriptionCount: 0,
+			createdAt: timestamp,
+			lastAccessedAt: timestamp,
+		})
+
+		// Increment creation counter
+		Effect.runSync(
+			Metric.update(
+				atomCreationsTotal.pipe(Metric.tagged("tier", tier), Metric.tagged("atom_id", atomId)),
+				1,
+			),
+		)
+	} else if (eventType === "disposed") {
+		atomMetricsRegistry.delete(atomId)
+
+		// Increment disposal counter
+		Effect.runSync(
+			Metric.update(
+				atomDisposalsTotal.pipe(
+					Metric.tagged("tier", tier),
+					Metric.tagged("atom_id", atomId),
+					Metric.tagged("reason", reason ?? "manual"),
+				),
+				1,
+			),
+		)
+	} else {
+		// Update subscription count and last accessed time
+		const existing = atomMetricsRegistry.get(atomId)
+		if (existing) {
+			existing.subscriptionCount = subscriptionCount
+			existing.lastAccessedAt = timestamp
+		}
+	}
+
+	// Update Prometheus gauge for subscription count
+	Effect.runSync(
+		Metric.update(
+			atomSubscriptionsActive.pipe(Metric.tagged("tier", tier), Metric.tagged("atom_id", atomId)),
+			subscriptionCount,
+		),
+	)
+
+	// Development-only logging
+	if (process.env.NODE_ENV === "development") {
+		logAtomLifecycle(event)
+	}
+}
+
+/**
+ * Get current atom metrics for all tracked atoms
+ *
+ * Returns a snapshot of all atom metrics in the registry.
+ * Useful for debugging and monitoring.
+ *
+ * @returns Array of atom metrics snapshots
+ *
+ * @example
+ * ```typescript
+ * const metrics = getAtomMetrics()
+ * console.log(`Total atoms: ${metrics.length}`)
+ * console.log(`Session tier atoms: ${metrics.filter(m => m.tier === "session").length}`)
+ * ```
+ */
+export function getAtomMetrics(): AtomMetrics[] {
+	return Array.from(atomMetricsRegistry.values())
+}
+
+/**
+ * Log atom lifecycle event to console (development-only)
+ *
+ * Formats atom lifecycle events with clear visual structure.
+ * Only called when NODE_ENV=development.
+ *
+ * @param event - Atom lifecycle event to log
+ *
+ * @example
+ * ```typescript
+ * logAtomLifecycle({
+ *   atomId: "sessionsAtom",
+ *   tier: "session",
+ *   event: "subscribed",
+ *   subscriptionCount: 1,
+ *   timestamp: new Date()
+ * })
+ * // [ATOM] sessionsAtom (session) subscribed → 1 subscribers
+ * ```
+ */
+export function logAtomLifecycle(event: AtomLifecycleEvent): void {
+	const { atomId, tier, event: eventType, subscriptionCount, reason } = event
+
+	const prefix = "[ATOM]"
+	const tierLabel = `(${tier})`
+	const countLabel = `→ ${subscriptionCount} subscriber${subscriptionCount === 1 ? "" : "s"}`
+	const reasonLabel = reason ? ` (${reason})` : ""
+
+	const message = `${prefix} ${atomId} ${tierLabel} ${eventType}${reasonLabel} ${countLabel}`
+
+	// Use Effect logging for consistency
+	Effect.runSync(Effect.logDebug(message))
+}
+
+/**
+ * Clear atom metrics registry
+ *
+ * Useful for testing to reset state between test runs.
+ */
+export function clearAtomMetrics(): void {
+	atomMetricsRegistry.clear()
+}

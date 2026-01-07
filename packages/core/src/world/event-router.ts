@@ -19,6 +19,11 @@ import {
 	sessionToInstancePortAtom,
 	instancesAtom,
 } from "./atoms.js"
+import {
+	getOrCreateSessionAtom,
+	sessionAtomRegistry,
+	clearSessionAtomRegistry,
+} from "./session-atom.js"
 import type { SSEEvent } from "../sse/schemas.js"
 import type { SessionStatus } from "../types/events.js"
 import type { Session, Message, Part } from "../types/domain.js"
@@ -38,6 +43,12 @@ export function routeEvent(event: SSEEvent, registry: Registry.Registry, sourceP
 		case "session.updated": {
 			// SessionInfo from schema IS Session domain type (type alias)
 			const session = event.properties.info as Session
+
+			// ADR-019 Phase 2: Route to SessionAtom FIRST
+			const sessionAtom = getOrCreateSessionAtom(session.id)
+			registry.set(sessionAtom.sessionAtom, session)
+
+			// THEN update global atoms (preserve existing behavior)
 			// Upsert session in sessionsAtom (Map)
 			const sessions = registry.get(sessionsAtom)
 			const updated = new Map(sessions)
@@ -59,6 +70,12 @@ export function routeEvent(event: SSEEvent, registry: Registry.Registry, sourceP
 
 		case "session.deleted": {
 			const session = event.properties.info as Session
+
+			// ADR-019 Phase 2: Clear SessionAtom from registry
+			// The SessionAtom's idleTTL will handle cleanup of individual atoms
+			sessionAtomRegistry.delete(session.id)
+
+			// THEN update global atoms (preserve existing behavior)
 			// Remove session from sessionsAtom
 			const sessions = registry.get(sessionsAtom)
 			const updated = new Map(sessions)
@@ -78,6 +95,22 @@ export function routeEvent(event: SSEEvent, registry: Registry.Registry, sourceP
 			// MessageInfo from schema has `model: unknown`, Message domain type has typed model
 			// Safe cast: Runtime structure is compatible, types differ for static analysis
 			const message = event.properties.info as any as Message
+			const sessionId = message.sessionID
+
+			// ADR-019 Phase 2: Route to SessionAtom FIRST
+			if (sessionId) {
+				const sessionAtom = getOrCreateSessionAtom(sessionId)
+				const currentMessages = registry.get(sessionAtom.messagesAtom)
+				// Add or update message in array (maintain order)
+				const existingIndex = currentMessages.findIndex((m) => m.id === message.id)
+				const updatedMessages =
+					existingIndex >= 0
+						? currentMessages.map((m, i) => (i === existingIndex ? message : m))
+						: [...currentMessages, message]
+				registry.set(sessionAtom.messagesAtom, updatedMessages)
+			}
+
+			// THEN update global atoms (preserve existing behavior)
 			// Upsert message in messagesAtom (Map)
 			const messages = registry.get(messagesAtom)
 			const updated = new Map(messages)
@@ -86,7 +119,6 @@ export function routeEvent(event: SSEEvent, registry: Registry.Registry, sourceP
 
 			// CRITICAL: Receiving message events = session is active
 			// Mark as "running" since we're getting live data
-			const sessionId = message.sessionID
 			if (sessionId) {
 				const statuses = registry.get(statusAtom)
 				const updatedStatuses = new Map(statuses)
@@ -108,7 +140,19 @@ export function routeEvent(event: SSEEvent, registry: Registry.Registry, sourceP
 		}
 
 		case "message.removed": {
-			const { messageID } = event.properties
+			const { messageID, sessionID } = event.properties
+
+			// ADR-019 Phase 2: Remove from SessionAtom if sessionID is available
+			if (sessionID) {
+				const sessionAtom = sessionAtomRegistry.get(sessionID)
+				if (sessionAtom) {
+					const currentMessages = registry.get(sessionAtom.messagesAtom)
+					const updatedMessages = currentMessages.filter((m) => m.id !== messageID)
+					registry.set(sessionAtom.messagesAtom, updatedMessages)
+				}
+			}
+
+			// THEN update global atoms (preserve existing behavior)
 			// Remove message from messagesAtom
 			const messages = registry.get(messagesAtom)
 			const updated = new Map(messages)
@@ -122,15 +166,29 @@ export function routeEvent(event: SSEEvent, registry: Registry.Registry, sourceP
 			// Part from schema IS the Part domain type (type alias: Part = SSEPart)
 			const partData = event.properties.part as Part
 
+			// CRITICAL: part.sessionID is available directly - NO message lookup!
+			// This is the key insight from mem-b8ab15188f533bf4
+			const sessionId = partData.sessionID
+
+			// ADR-019 Phase 2: Route to SessionAtom FIRST
+			if (sessionId) {
+				const sessionAtom = getOrCreateSessionAtom(sessionId)
+				const currentParts = registry.get(sessionAtom.partsAtom)
+				// Add or update part in array (maintain order)
+				const existingIndex = currentParts.findIndex((p) => p.id === partData.id)
+				const updatedParts =
+					existingIndex >= 0
+						? currentParts.map((p, i) => (i === existingIndex ? partData : p))
+						: [...currentParts, partData]
+				registry.set(sessionAtom.partsAtom, updatedParts)
+			}
+
+			// THEN update global atoms (preserve existing behavior)
 			// Upsert part in partsAtom (Map)
 			const parts = registry.get(partsAtom)
 			const updated = new Map(parts)
 			updated.set(partData.id, partData)
 			registry.set(partsAtom, updated)
-
-			// CRITICAL: part.sessionID is available directly - NO message lookup!
-			// This is the key insight from mem-b8ab15188f533bf4
-			const sessionId = partData.sessionID
 
 			if (sessionId) {
 				// CRITICAL: Receiving part events = session is DEFINITELY running
@@ -155,7 +213,19 @@ export function routeEvent(event: SSEEvent, registry: Registry.Registry, sourceP
 		}
 
 		case "message.part.removed": {
-			const { partID } = event.properties
+			const { partID, sessionID } = event.properties
+
+			// ADR-019 Phase 2: Remove from SessionAtom if sessionID is available
+			if (sessionID) {
+				const sessionAtom = sessionAtomRegistry.get(sessionID)
+				if (sessionAtom) {
+					const currentParts = registry.get(sessionAtom.partsAtom)
+					const updatedParts = currentParts.filter((p) => p.id !== partID)
+					registry.set(sessionAtom.partsAtom, updatedParts)
+				}
+			}
+
+			// THEN update global atoms (preserve existing behavior)
 			// Remove part from partsAtom
 			const parts = registry.get(partsAtom)
 			const updated = new Map(parts)

@@ -85,6 +85,10 @@
 			"types": "./dist/world/debug.d.ts",
 			"import": "./dist/world/debug.js"
 		},
+		"./world/subscriptions": {
+			"types": "./dist/world/subscriptions.d.ts",
+			"import": "./dist/world/subscriptions.js"
+		},
 		"./ssr": {
 			"types": "./dist/client-ssr.d.ts",
 			"import": "./dist/client-ssr.js"
