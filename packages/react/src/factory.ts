@@ -18,8 +18,9 @@
 import { useCallback, useEffect, useState, useRef, useMemo } from "react"
 import type { OpencodeConfig } from "./next-ssr-plugin"
 import { useOpencodeStore } from "./store"
-import type { Session, ContextUsage, CompactionState, SessionStatus } from "./store/types"
+import type { ContextUsage, CompactionState, SessionStatus } from "./store/types"
 import { deriveSessionStatus, type DeriveSessionStatusOptions } from "./store/status-utils"
+import type { Session } from "@opencode-vibe/core/types"
 import { useCommands as useCommandsBase } from "./hooks/use-commands"
 import { useSSE as useSSEBase } from "./hooks/internal/use-sse"
 import type { UseSSEOptions, UseSSEReturn } from "./hooks/internal/use-sse"
@@ -46,6 +47,9 @@ import {
 } from "./hooks/use-multi-directory-status"
 import { getContextUsage, getCompactionState } from "./lib/delegation-helpers"
 import { useWorld } from "./hooks/use-world"
+import { useWorldSession } from "./hooks/use-world-session"
+import { useWorldMessages } from "./hooks/use-world-messages"
+import { useWorldSessionList } from "./hooks/use-world-session-list"
 import type { Instance, WorldState } from "@opencode-vibe/core/world/types"
 
 /**
@@ -188,45 +192,30 @@ export function getOpencodeConfig(fallback?: OpencodeConfig): OpencodeConfig {
  */
 export function generateOpencodeHelpers<TRouter = any>(config?: OpencodeConfig): OpencodeHelpers {
 	/**
-	 * Hook for accessing session data with real-time SSE updates
+	 * Hook for accessing a single session with real-time updates
+	 *
+	 * Delegates to useWorldSession (ADR-018) - sessions now managed by World Stream.
 	 *
 	 * @param sessionId - Session ID to fetch
-	 * @returns Session object or undefined if not found
+	 * @returns Session object or null if not found
 	 *
 	 * @example
 	 * ```tsx
 	 * const session = useSession("session-123")
 	 * if (session) {
-	 *   console.log(session.title)
+	 *   console.log(session.directory)
 	 * }
 	 * ```
 	 */
 	function useSession(sessionId: string) {
-		const cfg = getOpencodeConfig(config)
-
-		// Use Zustand store selector with useCallback to prevent unnecessary re-renders
-		const session = useOpencodeStore(
-			useCallback(
-				(state) => {
-					const dir = state.directories[cfg.directory]
-					if (!dir) return undefined
-					return dir.sessions.find((s) => s.id === sessionId)
-				},
-				[sessionId, cfg.directory],
-			),
-		)
-
-		// Initialize directory on mount
-		useEffect(() => {
-			if (!cfg.directory) return
-			useOpencodeStore.getState().initDirectory(cfg.directory)
-		}, [cfg.directory])
-
-		return session
+		// Delegate to World Stream hook (sessions no longer in Zustand)
+		return useWorldSession(sessionId)
 	}
 
 	/**
 	 * Hook for accessing messages in a session with real-time updates
+	 *
+	 * Delegates to useWorldMessages (ADR-018) - messages now managed by World Stream.
 	 *
 	 * @param sessionId - Session ID to get messages for
 	 * @returns Array of messages for the session
@@ -238,25 +227,13 @@ export function generateOpencodeHelpers<TRouter = any>(config?: OpencodeConfig):
 	 * ```
 	 */
 	function useMessages(sessionId: string) {
-		const cfg = getOpencodeConfig(config)
+		// Delegate to World Stream hook (messages no longer in Zustand)
+		return useWorldMessages(sessionId)
+	}
 
-		const messages = useOpencodeStore(
-			useCallback(
-				(state) => {
-					const dir = state.directories[cfg.directory]
-					if (!dir) return undefined
-					return dir.messages[sessionId]
-				},
-				[sessionId, cfg.directory],
-			),
-		)
-
-		useEffect(() => {
-			if (!cfg.directory) return
-			useOpencodeStore.getState().initDirectory(cfg.directory)
-		}, [cfg.directory])
-
-		// CRITICAL: Use stable empty array to prevent infinite loop
+	/**
+	 * DEPRECATED: Legacy empty array reference
+	 * CRITICAL: Use stable empty array to prevent infinite loop
 		// Don't use || [] or ?? [] in render - creates new reference every time
 		return useMemo(() => messages ?? [], [messages])
 	}
@@ -482,23 +459,20 @@ export function generateOpencodeHelpers<TRouter = any>(config?: OpencodeConfig):
 	}
 
 	/**
-	 * Hook to get all sessions from Zustand store
+	 * Hook to get all sessions from World Stream
 	 *
-	 * Returns sessions array from the store (updated via SSE).
+	 * Delegates to useWorldSessionList (ADR-018) - sessions now managed by World Stream.
 	 * Filters out archived sessions automatically.
 	 *
-	 * @returns Array of sessions
+	 * @returns Array of non-archived sessions
 	 */
 	function useSessionList(): Session[] {
-		const cfg = getOpencodeConfig(config)
+		// Delegate to World Stream hook (sessions no longer in Zustand)
+		const sessions = useWorldSessionList()
 
-		// Get sessions array from store (stable reference via Immer)
-		const sessions = useOpencodeStore((state) => state.directories[cfg.directory]?.sessions)
-
-		// CRITICAL: Filter in useMemo to avoid creating new array on every render
-		// The sessions reference from Zustand only changes when sessions actually update
+		// Filter out archived sessions (maintain compatibility with old behavior)
+		// Check time.archived field (from SDK Session type)
 		return useMemo(() => {
-			if (!sessions) return []
 			return sessions.filter((s) => !s.time?.archived)
 		}, [sessions])
 	}

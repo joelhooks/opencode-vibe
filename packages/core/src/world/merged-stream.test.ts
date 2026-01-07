@@ -385,7 +385,7 @@ describe("createMergedWorldStream", () => {
 		})
 	})
 
-	describe("event consumer (route to WorldStore)", () => {
+	describe.skip("event consumer (route to WorldStore) - DEFERRED: SwarmDb event routing removed in ADR-019 Phase 0c", () => {
 		it("routes session.created events to store", async () => {
 			const registry = Registry.make()
 			const sse = createTestSSE(registry)
@@ -721,7 +721,7 @@ describe("createMergedWorldStream", () => {
 		})
 	})
 
-	describe("async iterator lifecycle", () => {
+	describe.skip("async iterator lifecycle - DEFERRED: depends on pluggable event sources removed in ADR-019 Phase 0c", () => {
 		it("yields current state immediately on start", async () => {
 			const registry = Registry.make()
 			const sse = createTestSSE(registry)

@@ -1,9 +1,8 @@
 "use client"
 
-import { Fragment, useMemo, memo, useEffect } from "react"
+import { Fragment, useMemo, memo } from "react"
 import type { UIMessage, ChatStatus } from "ai"
 import { useMessagesWithParts, useSessionStatus } from "@/app/hooks"
-import { useOpencodeStore } from "@opencode-vibe/react"
 import {
 	transformMessages,
 	type ExtendedUIMessage,
@@ -283,17 +282,6 @@ export function SessionMessages({
 	initialStoreParts,
 	status: externalStatus,
 }: SessionMessagesProps) {
-	// Hydrate store with server-provided messages on mount
-	useEffect(() => {
-		if (!directory) return
-		if (!initialStoreMessages || initialStoreMessages.length === 0) return
-
-		// Hydrate messages and parts into store
-		useOpencodeStore
-			.getState()
-			.hydrateMessages(directory, sessionId, initialStoreMessages, initialStoreParts)
-	}, [directory, sessionId, initialStoreMessages, initialStoreParts])
-
 	// Get messages with parts from World Stream (reactive)
 	const storeMessages = useMessagesWithParts(sessionId)
 

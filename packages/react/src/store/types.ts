@@ -5,22 +5,7 @@
  * Each directory has isolated state with sessions, messages, parts, todos, etc.
  */
 
-import type { SessionStatus, GlobalEvent, Part, Message } from "@opencode-vibe/core/types"
-
-/**
- * Session type matching OpenCode API
- */
-export type Session = {
-	id: string
-	title: string
-	directory: string
-	parentID?: string
-	time: {
-		created: number
-		updated: number
-		archived?: number
-	}
-}
+import type { SessionStatus, GlobalEvent } from "@opencode-vibe/core/types"
 
 /**
  * Todo type for session tasks
@@ -69,16 +54,13 @@ export type CompactionState = {
 }
 
 /**
- * Directory-scoped state
+ * Directory-scoped state (UI-local only - sessions/messages/parts moved to World Stream)
  */
 export interface DirectoryState {
 	ready: boolean
-	sessions: Session[]
 	todos: Record<string, Todo[]>
-	messages: Record<string, Message[]>
-	parts: Record<string, Part[]>
 	modelLimits: Record<string, { context: number; output: number }>
 }
 
-// Re-export canonical types from core (used in DirectoryState above)
-export type { SessionStatus, GlobalEvent, Part, Message }
+// Re-export canonical types from core
+export type { SessionStatus, GlobalEvent }

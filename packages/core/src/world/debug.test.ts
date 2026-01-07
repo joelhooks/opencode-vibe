@@ -2,7 +2,7 @@
  * Tests for World Stream debug utilities
  */
 
-import { describe, test, expect } from "bun:test"
+import { describe, test, expect } from "vitest"
 import { Registry } from "@effect-atom/atom"
 import { getWorldDebugStats } from "./debug"
 import { messagesAtom, sessionsAtom, partsAtom, connectionStatusAtom } from "./atoms"

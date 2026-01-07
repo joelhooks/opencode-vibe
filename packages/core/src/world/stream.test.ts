@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest"
-import { connectionStatusAtom, WorldStore, Registry } from "./atoms.js"
+import { connectionStatusAtom, Registry } from "./atoms.js"
 import type { WorldSSE } from "./sse.js"
 import { createMergedWorldStream } from "./merged-stream.js"
 
@@ -198,85 +198,5 @@ describe("createWorldStream with dependency injection", () => {
 
 			await stream.dispose()
 		})
-	})
-})
-
-// Helper to create a valid session object
-function createSession(id: string, title: string = "Test Session") {
-	return {
-		id,
-		title,
-		directory: "/test",
-		time: { created: Date.now(), updated: Date.now() },
-	}
-}
-
-describe("WorldStore", () => {
-	it("derives enriched world state from raw data", () => {
-		const store = new WorldStore()
-
-		// Add a session
-		store.setSessions([createSession("ses_1", "Test Session") as any])
-
-		// Add status
-		store.setStatus({ ses_1: "running" })
-
-		const state = store.getState()
-
-		expect(state.sessions.length).toBe(1)
-		expect(state.sessions[0].id).toBe("ses_1")
-		expect(state.sessions[0].status).toBe("running")
-		expect(state.sessions[0].isActive).toBe(true)
-		expect(state.activeSessionCount).toBe(1)
-	})
-
-	it("upserts sessions using binary search", () => {
-		const store = new WorldStore()
-
-		// Add sessions in order
-		store.upsertSession(createSession("ses_a", "A") as any)
-		store.upsertSession(createSession("ses_c", "C") as any)
-		store.upsertSession(createSession("ses_b", "B") as any)
-
-		const state = store.getState()
-		expect(state.sessions.length).toBe(3)
-	})
-
-	it("updates existing session on upsert", () => {
-		const store = new WorldStore()
-
-		store.upsertSession(createSession("ses_1", "Original") as any)
-		store.upsertSession(createSession("ses_1", "Updated") as any)
-
-		const state = store.getState()
-		expect(state.sessions.length).toBe(1)
-		expect(state.sessions[0].title).toBe("Updated")
-	})
-
-	it("notifies subscribers on state change", () => {
-		const store = new WorldStore()
-		const callback = vi.fn()
-
-		store.subscribe(callback)
-		store.setSessions([createSession("ses_1") as any])
-
-		expect(callback).toHaveBeenCalled()
-	})
-
-	it("unsubscribe stops notifications", () => {
-		const store = new WorldStore()
-		const callback = vi.fn()
-
-		const unsubscribe = store.subscribe(callback)
-		// Subscribe fires immediately with current state
-		expect(callback).toHaveBeenCalledOnce()
-
-		callback.mockClear()
-		unsubscribe()
-
-		store.setSessions([createSession("ses_1") as any])
-
-		// Callback should not have been called after unsubscribe
-		expect(callback).not.toHaveBeenCalled()
 	})
 })

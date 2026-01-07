@@ -407,9 +407,9 @@ describe("Part list operations", () => {
 
 	it("should handle parts with different types", () => {
 		const parts: Part[] = [
-			createPart("part-a", "msg-1", "text"),
-			createPart("part-b", "msg-1", "tool_call"),
-			createPart("part-c", "msg-1", "compaction"),
+			createPart("part-a", "msg-1", "ses-1", "text"),
+			createPart("part-b", "msg-1", "ses-1", "tool_call"),
+			createPart("part-c", "msg-1", "ses-1", "compaction"),
 		]
 
 		// Binary search should work regardless of type

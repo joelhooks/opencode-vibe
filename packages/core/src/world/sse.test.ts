@@ -17,7 +17,7 @@
 
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest"
 import { Effect, Stream, Fiber, Duration } from "effect"
-import { WorldSSE, createWorldSSE, connectToSSE } from "./sse.js"
+import { WorldSSE, connectToSSE } from "./sse.js"
 import {
 	Registry,
 	connectionStatusAtom,
@@ -485,31 +485,6 @@ describe("WorldSSE - Discovery Loop", () => {
 		expect(["discovering", "connecting", "disconnected", "connected"]).toContain(status)
 
 		sse.stop()
-	})
-})
-
-// ============================================================================
-// createWorldSSE Factory Tests
-// ============================================================================
-
-describe("createWorldSSE - Factory Function", () => {
-	it("creates WorldSSE instance", () => {
-		const registry = Registry.make()
-		const sse = createWorldSSE(registry)
-
-		expect(sse).toBeInstanceOf(WorldSSE)
-	})
-
-	it("passes config to WorldSSE constructor", () => {
-		const registry = Registry.make()
-		const config = { serverUrl: "http://localhost:3000" }
-		const sse = createWorldSSE(registry, config)
-
-		// Start and stop to verify config was applied
-		sse.start()
-		sse.stop()
-
-		expect(sse).toBeInstanceOf(WorldSSE)
 	})
 })
 

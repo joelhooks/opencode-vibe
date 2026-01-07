@@ -4,33 +4,18 @@
  * Effect-forward implementation that:
  * 1. Discovers servers via Discovery service (browser fetch proxy or Node.js lsof)
  * 2. Connects directly to server SSE endpoints
- * 3. Feeds events to WorldStore atoms
+ * 3. Feeds events to effect-atom state atoms
  *
  * Uses Discovery Layer from config (defaults to empty implementation).
  * This enables testing with mock Discovery implementations.
  */
 
-import {
-	Effect,
-	Stream,
-	Schedule,
-	Fiber,
-	Ref,
-	Queue,
-	Scope,
-	Metric,
-	Duration,
-	Context,
-	Layer,
-	Exit,
-	Either,
-} from "effect"
+import { Effect, Stream, Schedule, Fiber, Scope, Layer, Exit, Either } from "effect"
 import { createParser, type EventSourceParser } from "eventsource-parser"
 import type { Message, Part, Session } from "../types/domain.js"
 import type { SessionStatus } from "../types/events.js"
 import { normalizeBackendStatus, type BackendSessionStatus } from "../types/sessions.js"
 import {
-	WorldStore,
 	Registry,
 	sessionsAtom,
 	messagesAtom,
@@ -46,7 +31,13 @@ import { WorldMetrics } from "./metrics.js"
 import type { Project } from "../types/sdk.js"
 import { parseSSEEvent } from "../sse/parse.js"
 import type { SSEEvent as ParsedSSEEvent } from "../sse/schemas.js"
-import { routeEvent } from "./event-router.js"
+import {
+	routeEvent,
+	createSessionEvents,
+	createStatusEvents,
+	createMessageEvents,
+	createPartEvents,
+} from "./event-router.js"
 import { Discovery, type DiscoveredServer } from "./discovery/index.js"
 
 // Default empty Discovery layer for when no discoveryLayer is provided in config
@@ -460,6 +451,16 @@ export class WorldSSE {
 			this.connectionFibers.delete(port)
 		}
 		this.connectedPorts.delete(port)
+
+		// Clean up stale session→port mappings for this server
+		const mapping = this.registry.get(sessionToInstancePortAtom)
+		const updatedMapping = new Map(mapping)
+		for (const [sessionId, mappedPort] of mapping.entries()) {
+			if (mappedPort === port) {
+				updatedMapping.delete(sessionId)
+			}
+		}
+		this.registry.set(sessionToInstancePortAtom, updatedMapping)
 	}
 
 	/**
@@ -492,19 +493,11 @@ export class WorldSSE {
 			const backendStatusMap = (statusRes as Record<string, BackendSessionStatus>) || {}
 			const project = projectRes as Project | null
 
-			// Normalize status
-			const statusMap = new Map<string, SessionStatus>()
-			for (const [sessionId, backendStatus] of Object.entries(backendStatusMap)) {
-				statusMap.set(sessionId, normalizeBackendStatus(backendStatus))
-			}
+			// Collect all data for synthetic event generation
+			const allMessages: Message[] = []
+			const allParts: Part[] = []
 
-			// Update Registry with sessions (convert array to Map keyed by id)
-			const sessionMap = new Map(sessions.map((s) => [s.id, s]))
-			this.registry.set(sessionsAtom, sessionMap)
-			this.registry.set(statusAtom, statusMap)
-
-			// CRITICAL FIX: Fetch messages and parts for each session
-			// This populates messagesAtom and partsAtom so UI shows messages immediately
+			// Fetch messages and parts for each session
 			for (const session of sessions) {
 				const messages = yield* Effect.tryPromise(() =>
 					fetch(`${baseUrl}/session/${session.id}/message`).then(
@@ -512,12 +505,7 @@ export class WorldSSE {
 					),
 				).pipe(Effect.catchAll(() => Effect.succeed([] as Message[])))
 
-				const existingMessages = this.registry.get(messagesAtom)
-				const updatedMessages = new Map(existingMessages)
-				for (const message of messages) {
-					updatedMessages.set(message.id, message)
-				}
-				this.registry.set(messagesAtom, updatedMessages)
+				allMessages.push(...messages)
 
 				for (const message of messages) {
 					// Skip messages without valid IDs
@@ -531,13 +519,24 @@ export class WorldSSE {
 						),
 					).pipe(Effect.catchAll(() => Effect.succeed([] as Part[])))
 
-					const existingParts = this.registry.get(partsAtom)
-					const updatedParts = new Map(existingParts)
-					for (const part of parts) {
-						updatedParts.set(part.id, part)
-					}
-					this.registry.set(partsAtom, updatedParts)
+					allParts.push(...parts)
 				}
+			}
+
+			// Generate synthetic events from bootstrap data
+			const sessionEvents = createSessionEvents(sessions)
+			const messageEvents = createMessageEvents(allMessages)
+			const partEvents = createPartEvents(allParts)
+			const statusEvents = createStatusEvents(backendStatusMap)
+
+			// CRITICAL ORDER: Apply status events LAST
+			// Message/part events set status to "running", so status events must come last
+			// to reflect the true state from the backend
+			const allEvents = [...sessionEvents, ...messageEvents, ...partEvents, ...statusEvents]
+
+			// Route all synthetic events through the event router
+			for (const event of allEvents) {
+				routeEvent(event, this.registry, port)
 			}
 
 			// Update projects - merge with existing projects from other instances
@@ -584,100 +583,3 @@ export class WorldSSE {
 		routeEvent(parsed, this.registry, sourcePort)
 	}
 }
-
-/**
- * Create a WorldSSE instance connected to a Registry
- */
-export function createWorldSSE(registry: Registry.Registry, config?: WorldSSEConfig): WorldSSE {
-	return new WorldSSE(registry, config)
-}
-
-// ============================================================================
-// SSEService - Effect.Service wrapper
-// ============================================================================
-
-/**
- * SSEService interface - Effect.Service wrapper around WorldSSE
- *
- * Provides scoped lifecycle management with Effect.Service pattern.
- * The WorldSSE instance is created on acquire and cleaned up on release.
- */
-export interface SSEServiceInterface {
-	/**
-	 * Start SSE connections
-	 */
-	start: () => Effect.Effect<void, never, never>
-
-	/**
-	 * Stop SSE connections
-	 */
-	stop: () => Effect.Effect<void, never, never>
-
-	/**
-	 * Get connected ports
-	 */
-	getConnectedPorts: () => Effect.Effect<number[], never, never>
-}
-
-/**
- * SSEService tag for dependency injection
- */
-export class SSEService extends Context.Tag("SSEService")<SSEService, SSEServiceInterface>() {}
-
-/**
- * SSEService Layer with scoped lifecycle
- *
- * Pattern from cursor-store.ts: Layer.scoped wraps WorldSSE class,
- * providing Effect-native lifecycle management.
- *
- * Composes with Discovery layer from config (defaults to empty implementation).
- * This enables testing with mock Discovery implementations.
- *
- * @param registry - Registry to feed events into
- * @param config - SSE configuration (optional discoveryLayer for testing)
- *
- * @example
- * ```typescript
- * // Default discovery (empty implementation - returns [])
- * const program = Effect.gen(function* () {
- *   const sseService = yield* SSEService
- *   yield* sseService.start()
- *   // SSE active within scope
- *   yield* Effect.sleep(Duration.seconds(10))
- *   // Auto-cleanup when scope exits
- * })
- *
- * Effect.runPromise(
- *   program.pipe(Effect.provide(SSEServiceLive(registry)))
- * )
- *
- * // Custom discovery for Node.js
- * import { DiscoveryNodeLive } from "@opencode-vibe/core/world/discovery/node"
- * Effect.runPromise(
- *   program.pipe(
- *     Effect.provide(SSEServiceLive(registry, { discoveryLayer: DiscoveryNodeLive }))
- *   )
- * )
- * ```
- */
-export const SSEServiceLive = (
-	registry: Registry.Registry,
-	config?: WorldSSEConfig,
-): Layer.Layer<SSEService, never, never> =>
-	Layer.scoped(
-		SSEService,
-		Effect.acquireRelease(
-			// Acquire: Create WorldSSE instance
-			Effect.sync(() => {
-				const sse = new WorldSSE(registry, config)
-
-				return {
-					start: () => Effect.sync(() => sse.start()),
-					stop: () => Effect.sync(() => sse.stop()),
-					getConnectedPorts: () => Effect.sync(() => sse.getConnectedPorts()),
-				}
-			}),
-			// Release: Stop WorldSSE on scope exit
-			(service) => service.stop(),
-		),
-	)

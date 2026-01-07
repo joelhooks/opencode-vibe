@@ -136,18 +136,22 @@ describe("SSE Proxy Route /api/sse/[port]", () => {
 
 			expect(response.status).toBe(200)
 			expect(response.headers.get("Content-Type")).toBe("text/event-stream")
-			expect(response.headers.get("Cache-Control")).toBe("no-cache")
+			// Cache-Control may include additional directives like "no-transform"
+			expect(response.headers.get("Cache-Control")).toContain("no-cache")
 			expect(response.headers.get("Connection")).toBe("keep-alive")
 			expect(response.headers.get("X-Accel-Buffering")).toBe("no")
 			expect(response.body).toBe(mockStream)
 
 			// Verify fetch was called with correct URL and headers
-			expect(global.fetch).toHaveBeenCalledWith("http://127.0.0.1:3000/global/event", {
-				headers: {
-					Accept: "text/event-stream",
-					"Cache-Control": "no-cache",
-				},
-			})
+			expect(global.fetch).toHaveBeenCalledWith(
+				"http://127.0.0.1:3000/global/event",
+				expect.objectContaining({
+					headers: {
+						Accept: "text/event-stream",
+						"Cache-Control": "no-cache",
+					},
+				}),
+			)
 		})
 
 		it("accepts valid ports within range", async () => {

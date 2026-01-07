@@ -1,10 +1,16 @@
 /**
- * onEvent Callback Tests - Characterization test for bug
+ * onEvent Callback Tests - SKIPPED (SwarmDb deferred)
  *
- * Bug: swarm-db events not appearing in watch feed event log
- * Root cause: onEvent callback not being invoked for non-SSE sources
+ * These tests were for SwarmDb event routing which was deferred in ADR-019 Phase 0c.
+ * The pluggable event source functionality (routeEventToRegistry) was removed because:
+ * 1. SwarmDb was not part of original router unification scope
+ * 2. No active SwarmDb callers exist in current codebase
+ * 3. SSE event flow is complete and functional
  *
- * This test captures the CURRENT (broken) behavior, then we fix it.
+ * When SwarmDb is re-added, these tests should be re-enabled and the event routing
+ * logic should be added to handle non-SSE event sources.
+ *
+ * See: docs/adr/019-hierarchical-event-subscriptions.md section "Outstanding TODOs #8"
  */
 
 import { describe, it, expect, vi } from "vitest"
@@ -47,7 +53,7 @@ async function waitForCondition(check: () => boolean, timeoutMs = 1000): Promise
 	}
 }
 
-describe("onEvent callback for swarm-db events", () => {
+describe.skip("onEvent callback for swarm-db events (DEFERRED - see ADR-019)", () => {
 	it("onEvent callback IS invoked for swarm-db events (working behavior)", async () => {
 		const now = Date.now()
 

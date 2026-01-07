@@ -17,8 +17,8 @@ export type { SSEEventInfo } from "./types.js"
 export type { DiscoveredServer } from "./discovery/types.js"
 
 // SSE internals (for advanced usage)
-export { WorldSSE, createWorldSSE, connectToSSE, SSEService, SSEServiceLive } from "./sse.js"
-export type { SSEEvent, WorldSSEConfig, SSEServiceInterface } from "./sse.js"
+export { WorldSSE, connectToSSE } from "./sse.js"
+export type { SSEEvent, WorldSSEConfig } from "./sse.js"
 
 // Enriched types
 export type { Instance, EnrichedProject, EnrichedMessage, EnrichedSession } from "./types.js"

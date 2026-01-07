@@ -1,6 +1,18 @@
 /**
- * Merged Stream Integration Tests
+ * Merged Stream Integration Tests - SKIPPED (SwarmDb deferred)
  *
+ * These tests were for SwarmDb + SSE event interleaving which was deferred in ADR-019 Phase 0c.
+ * The pluggable event source functionality (routeEventToRegistry) was removed because:
+ * 1. SwarmDb was not part of original router unification scope
+ * 2. No active SwarmDb callers exist in current codebase
+ * 3. SSE event flow is complete and functional
+ *
+ * When SwarmDb is re-added, these tests should be re-enabled and the event routing
+ * logic should be added to handle non-SSE event sources.
+ *
+ * See: docs/adr/019-hierarchical-event-subscriptions.md section "Outstanding TODOs #8"
+ *
+ * Original description:
  * Tests the full integration of merged streams with WorldStore:
  * - SSE + swarm.db event interleaving
  * - Graceful degradation when sources unavailable
@@ -86,7 +98,7 @@ async function waitForCondition<T>(
 	})
 }
 
-describe("Merged Stream Integration Tests", () => {
+describe.skip("Merged Stream Integration Tests - DEFERRED: SwarmDb event routing removed in ADR-019 Phase 0c", () => {
 	describe("SSE + swarm.db event interleaving", () => {
 		it("merges events from SSE and swarm.db into WorldStore", async () => {
 			const now = Date.now()

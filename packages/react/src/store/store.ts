@@ -1,18 +1,15 @@
 /**
- * Zustand store for OpenCode state management with DirectoryState pattern
+ * Zustand store for OpenCode UI-local state management
  *
- * Uses Immer middleware for immutable updates and Binary utilities from core
- * for O(log n) session/message operations on sorted arrays.
+ * Uses Immer middleware for immutable updates.
+ * Each directory has isolated state with UI-local data only (ready flag, todos, modelLimits).
  *
- * Arrays are sorted by ID (lexicographic, ULID-compatible).
- * Each directory has isolated state with sessions, messages, parts, todos, etc.
+ * Sessions, messages, and parts are now managed by World Stream (ADR-018).
  */
 
-import { Binary } from "@opencode-vibe/core"
-import type { Message, Part } from "@opencode-vibe/core/types"
 import { create } from "zustand"
 import { immer } from "zustand/middleware/immer"
-import type { DirectoryState, GlobalEvent, Session, SessionStatus } from "./types"
+import type { DirectoryState, GlobalEvent } from "./types"
 
 /**
  * Default model limits when API unavailable or model not found.
@@ -27,10 +24,11 @@ const DEFAULT_MODEL_LIMITS = {
 } as const
 
 /**
- * Store state shape
+ * Store state shape (UI-local only)
  *
  * Contains isolated state for multiple project directories.
- * Each directory has its own sessions, messages, parts, and metadata.
+ * Each directory has UI-local state only (ready, todos, modelLimits).
+ * Sessions, messages, and parts are managed by World Stream (ADR-018).
  *
  * @property directories - Map of directory path to DirectoryState
  */
@@ -39,14 +37,13 @@ type OpencodeState = {
 }
 
 /**
- * Store actions for managing OpenCode state
+ * Store actions for managing OpenCode state (UI-local only)
  *
  * All actions use Immer middleware for immutable updates.
- * Arrays are maintained in sorted order (by ID) for O(log n) binary search.
  *
  * @remarks
- * Use `getState()` when calling actions inside useEffect/useCallback to avoid
- * dependency issues (the hook return value creates new references on every render).
+ * Sessions, messages, and parts are now managed by World Stream (ADR-018).
+ * This store only contains UI-local state: ready flag, todos, modelLimits.
  */
 type OpencodeActions = {
 	// Directory management
@@ -112,37 +109,8 @@ type OpencodeActions = {
 	 */
 	handleSSEEvent: (event: GlobalEvent) => void
 
-	// Setter actions
+	// Setter actions (UI-local state only)
 	setSessionReady: (directory: string, ready: boolean) => void
-	setSessions: (directory: string, sessions: Session[]) => void
-	setMessages: (directory: string, sessionID: string, messages: Message[]) => void
-	setParts: (directory: string, messageID: string, parts: Part[]) => void
-
-	// Hydration (server-side initial data)
-	hydrateMessages: (
-		directory: string,
-		sessionID: string,
-		messages: Message[],
-		parts: Record<string, Part[]>,
-	) => void
-
-	// Session convenience methods
-	getSession: (directory: string, id: string) => Session | undefined
-	getSessions: (directory: string) => Session[]
-	addSession: (directory: string, session: Session) => void
-	updateSession: (directory: string, id: string, updater: (draft: Session) => void) => void
-	removeSession: (directory: string, id: string) => void
-
-	// Message convenience methods
-	getMessages: (directory: string, sessionID: string) => Message[]
-	addMessage: (directory: string, message: Message) => void
-	updateMessage: (
-		directory: string,
-		sessionID: string,
-		messageID: string,
-		updater: (draft: Message) => void,
-	) => void
-	removeMessage: (directory: string, sessionID: string, messageID: string) => void
 
 	// Model limits caching (for context usage calculation)
 	setModelLimits: (
@@ -158,29 +126,20 @@ type OpencodeActions = {
 /**
  * Factory for empty DirectoryState
  *
- * Creates initial state for a new directory with empty arrays and objects.
+ * Creates initial state for a new directory.
  * Used by `initDirectory` and `handleSSEEvent` when auto-creating directories.
  *
  * @returns DirectoryState with all fields initialized to empty/default values
  *
  * @remarks
- * MIGRATION NOTE (ADR-018 - Zustand Elimination Phase 5):
- * The following fields are DEPRECATED and should be removed from DirectoryState:
- * - `sessions` → use world.sessions (World Stream)
- * - `messages` → use world.sessions[].messages (World Stream)
- * - `parts` → use world.sessions[].messages[].parts (World Stream)
- *
- * Keep only UI-local state:
+ * UI-local state only (sessions/messages/parts moved to World Stream per ADR-018):
  * - `ready` → Bootstrap/initialization flag (UI state)
  * - `todos` → Session todos (not yet in World Stream)
  * - `modelLimits` → Model context/output limits cache (offline capability)
  */
 const createEmptyDirectoryState = (): DirectoryState => ({
 	ready: false,
-	sessions: [], // DEPRECATED - use world.sessions
 	todos: {},
-	messages: {}, // DEPRECATED - use world.sessions[].messages
-	parts: {}, // DEPRECATED - use world.sessions[].messages[].parts
 	modelLimits: {},
 })
 
@@ -291,240 +250,6 @@ export const useOpencodeStore = create<OpencodeState & OpencodeActions>()(
 			})
 		},
 
-		// Set sessions array (sorted)
-		setSessions: (directory, sessions) => {
-			set((state) => {
-				if (state.directories[directory]) {
-					// Sort by ID for binary search
-					state.directories[directory]!.sessions = sessions.sort((a, b) => a.id.localeCompare(b.id))
-				}
-			})
-		},
-
-		// Set messages array (sorted)
-		setMessages: (directory, sessionID, messages) => {
-			set((state) => {
-				if (state.directories[directory]) {
-					// Sort by ID for binary search
-					state.directories[directory]!.messages[sessionID] = messages.sort((a, b) =>
-						a.id.localeCompare(b.id),
-					)
-				}
-			})
-		},
-
-		// Set parts array (sorted)
-		setParts: (directory, messageID, parts) => {
-			set((state) => {
-				if (state.directories[directory]) {
-					// Sort by ID for binary search
-					state.directories[directory]!.parts[messageID] = parts.sort((a, b) =>
-						a.id.localeCompare(b.id),
-					)
-				}
-			})
-		},
-
-		/**
-		 * Hydrate store with initial messages and parts from RSC
-		 *
-		 * This populates the store with server-rendered data before SSE connects,
-		 * preventing the "blink" where tools appear first then text pops in later.
-		 *
-		 * Uses the same binary search insertion as SSE events, so duplicate events
-		 * from SSE will be deduplicated (existing IDs are updated, not inserted).
-		 *
-		 * @param directory - Project directory path
-		 * @param sessionID - Session ID to hydrate messages for
-		 * @param messages - Array of messages to hydrate
-		 * @param parts - Record of messageID -> Part[] to hydrate
-		 *
-		 * @example
-		 * ```tsx
-		 * // In RSC (page.tsx)
-		 * const messages = await client.session.message.list({ sessionID })
-		 * const parts = {} // Build parts from messages
-		 *
-		 * // In client component
-		 * useEffect(() => {
-		 *   store.hydrateMessages(directory, sessionID, messages, parts)
-		 * }, [])
-		 * ```
-		 */
-		hydrateMessages: (directory, sessionID, messages, parts) => {
-			set((state) => {
-				// Auto-create directory if not exists
-				if (!state.directories[directory]) {
-					state.directories[directory] = createEmptyDirectoryState()
-				}
-				const dir = state.directories[directory]
-				if (!dir) return
-
-				// Filter out invalid messages (must have id) and sort
-				const validMessages = messages.filter((m) => m && typeof m.id === "string")
-				dir.messages[sessionID] = validMessages.sort((a, b) => a.id.localeCompare(b.id))
-
-				// Hydrate parts for each message (sorted)
-				for (const [messageID, messageParts] of Object.entries(parts)) {
-					if (!messageID || !Array.isArray(messageParts)) continue
-					const validParts = messageParts.filter((p) => p && typeof p.id === "string")
-					dir.parts[messageID] = validParts.sort((a, b) => a.id.localeCompare(b.id))
-				}
-			})
-		},
-
-		// ═══════════════════════════════════════════════════════════════
-		// SESSION CONVENIENCE METHODS
-		// ═══════════════════════════════════════════════════════════════
-
-		/**
-		 * Get a single session by ID
-		 */
-		getSession: (directory, id) => {
-			const dir = get().directories[directory]
-			if (!dir) return undefined
-
-			const result = Binary.search(dir.sessions, id, (s) => s.id)
-			return result.found ? dir.sessions[result.index] : undefined
-		},
-
-		/**
-		 * Get all sessions for a directory
-		 */
-		getSessions: (directory) => {
-			return get().directories[directory]?.sessions || []
-		},
-
-		/**
-		 * Add a session in sorted order
-		 */
-		addSession: (directory, session) => {
-			set((state) => {
-				// Auto-create directory if not exists
-				if (!state.directories[directory]) {
-					state.directories[directory] = createEmptyDirectoryState()
-				}
-				const dir = state.directories[directory]
-				if (!dir) return
-
-				const result = Binary.search(dir.sessions, session.id, (s) => s.id)
-				if (result.found) {
-					// Session exists - replace it
-					dir.sessions[result.index] = session
-				} else {
-					// Session doesn't exist - insert it
-					dir.sessions.splice(result.index, 0, session)
-				}
-			})
-		},
-
-		/**
-		 * Update a session using an updater function
-		 */
-		updateSession: (directory, id, updater) => {
-			set((state) => {
-				const dir = state.directories[directory]
-				if (!dir) return
-
-				const result = Binary.search(dir.sessions, id, (s) => s.id)
-				if (result.found) {
-					const session = dir.sessions[result.index]
-					if (!session) return
-					updater(session)
-				}
-			})
-		},
-
-		/**
-		 * Remove a session by ID
-		 */
-		removeSession: (directory, id) => {
-			set((state) => {
-				const dir = state.directories[directory]
-				if (!dir) return
-
-				const result = Binary.search(dir.sessions, id, (s) => s.id)
-				if (result.found) {
-					dir.sessions.splice(result.index, 1)
-				}
-			})
-		},
-
-		// ═══════════════════════════════════════════════════════════════
-		// MESSAGE CONVENIENCE METHODS
-		// ═══════════════════════════════════════════════════════════════
-
-		/**
-		 * Get all messages for a session
-		 */
-		getMessages: (directory, sessionID) => {
-			return get().directories[directory]?.messages[sessionID] || []
-		},
-
-		/**
-		 * Add a message in sorted order
-		 */
-		addMessage: (directory, message) => {
-			set((state) => {
-				// Auto-create directory if not exists
-				if (!state.directories[directory]) {
-					state.directories[directory] = createEmptyDirectoryState()
-				}
-				const dir = state.directories[directory]
-				if (!dir) return
-
-				// Initialize messages array if needed
-				if (!dir.messages[message.sessionID]) {
-					dir.messages[message.sessionID] = []
-				}
-
-				const messages = dir.messages[message.sessionID]
-				if (!messages) return
-				const result = Binary.search(messages, message.id, (m) => m.id)
-				if (!result.found) {
-					messages.splice(result.index, 0, message)
-				}
-			})
-		},
-
-		/**
-		 * Update a message using an updater function
-		 */
-		updateMessage: (directory, sessionID, messageID, updater) => {
-			set((state) => {
-				const dir = state.directories[directory]
-				if (!dir) return
-
-				const messages = dir.messages[sessionID]
-				if (!messages) return
-
-				const result = Binary.search(messages, messageID, (m) => m.id)
-				if (result.found) {
-					const message = messages[result.index]
-					if (!message) return
-					updater(message)
-				}
-			})
-		},
-
-		/**
-		 * Remove a message by ID
-		 */
-		removeMessage: (directory, sessionID, messageID) => {
-			set((state) => {
-				const dir = state.directories[directory]
-				if (!dir) return
-
-				const messages = dir.messages[sessionID]
-				if (!messages) return
-
-				const result = Binary.search(messages, messageID, (m) => m.id)
-				if (result.found) {
-					messages.splice(result.index, 1)
-				}
-			})
-		},
-
 		// ═══════════════════════════════════════════════════════════════
 		// MODEL LIMITS METHODS (for context usage calculation)
 		// ═══════════════════════════════════════════════════════════════
@@ -620,56 +345,3 @@ export const useOpencodeStore = create<OpencodeState & OpencodeActions>()(
 		},
 	})),
 )
-
-/**
- * Memoized selector for part summary to avoid deep object traversal.
- * Returns undefined for non-tool parts or pending status.
- *
- * This function prevents unnecessary re-renders caused by Immer's new object references.
- * The selector extracts only the summary string, which allows Zustand's default equality
- * check (Object.is) to correctly identify when the value hasn't changed.
- *
- * For primitive values like strings, Object.is compares by value, so identical strings
- * are considered equal even if extracted from different part objects.
- *
- * @param directory - Project directory path
- * @param messageId - Message ID containing the part
- * @param partId - Part ID to get summary for
- * @returns Summary string or undefined
- *
- * @example
- * ```tsx
- * function TaskComponent({ messageId, partId }) {
- *   const summary = usePartSummary("/my/project", messageId, partId)
- *   return summary ? <div>{summary}</div> : null
- * }
- * ```
- */
-export function usePartSummary(
-	directory: string,
-	messageId: string,
-	partId: string,
-): string | undefined {
-	return useOpencodeStore((state) => {
-		const parts = state.directories[directory]?.parts[messageId]
-		if (!parts) return undefined
-
-		// Use binary search instead of find() - parts are sorted by ID
-		const result = Binary.search(parts, partId, (p: Part) => p.id)
-		if (!result.found) return undefined
-
-		const part = parts[result.index]
-		if (!part) return undefined
-		if (part.type !== "tool") {
-			return undefined
-		}
-
-		// Type assertion needed because Part has unknown fields
-		const partState = part.state as { status: string; metadata?: { summary?: string } } | undefined
-		if (!partState || partState.status === "pending") {
-			return undefined
-		}
-
-		return partState.metadata?.summary
-	})
-}

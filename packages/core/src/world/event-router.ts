@@ -5,6 +5,9 @@
  * Extracted from WorldSSE.handleEvent() for testability and reusability.
  *
  * Pattern: Parse at boundary (sse.ts), route here (event-router.ts), consume everywhere.
+ *
+ * Also provides synthetic event factories for bootstrap data.
+ * Bootstrap can create fake SSE events from REST API data and feed them through routeEvent().
  */
 
 import type { Registry } from "@effect-atom/atom"
@@ -19,6 +22,7 @@ import {
 import type { SSEEvent } from "../sse/schemas.js"
 import type { SessionStatus } from "../types/events.js"
 import type { Session, Message, Part } from "../types/domain.js"
+import type { BackendSessionStatus } from "../types/sessions.js"
 
 /**
  * Route an SSE event to the appropriate atom
@@ -239,3 +243,132 @@ export function routeEvent(event: SSEEvent, registry: Registry.Registry, sourceP
 		}
 	}
 }
+
+// ============================================================================
+// Synthetic Event Factories
+// ============================================================================
+
+/**
+ * Bootstrap Event Ordering
+ *
+ * CRITICAL: Status events must be applied LAST during bootstrap.
+ *
+ * Why: Message and part events set status to "running" (strong signal from live data).
+ * If status events are applied first, they get overwritten by subsequent message/part events.
+ *
+ * Correct order:
+ * 1. Sessions (session.created)
+ * 2. Messages (message.updated)
+ * 3. Parts (message.part.updated)
+ * 4. Status (session.status) - LAST to reflect true state
+ *
+ * Example:
+ * ```ts
+ * const sessionEvents = createSessionEvents(sessions)
+ * const messageEvents = createMessageEvents(messages)
+ * const partEvents = createPartEvents(parts)
+ * const statusEvents = createStatusEvents(statusMap)
+ *
+ * for (const event of [...sessionEvents, ...messageEvents, ...partEvents, ...statusEvents]) {
+ *   routeEvent(event, registry, sourcePort)
+ * }
+ * ```
+ */
+
+/**
+ * Create synthetic session.created events from bootstrap data
+ *
+ * Bootstrap fetches sessions from /session endpoint.
+ * This converts them to SSE events so bootstrap can use routeEvent() instead of direct registry.set().
+ *
+ * @param sessions - Array of sessions from REST API
+ * @returns Array of synthetic SSE events
+ */
+export function createSessionEvents(sessions: Session[]): SSEEvent[] {
+	return sessions.map((session) => ({
+		type: "session.created" as const,
+		properties: {
+			info: session,
+		},
+	}))
+}
+
+/**
+ * Create synthetic session.status events from bootstrap status map
+ *
+ * Bootstrap fetches status from /session/status endpoint.
+ * Backend returns Map<sessionId, BackendSessionStatus>.
+ * This converts to SSE events matching session.status schema.
+ *
+ * @param statusMap - Map of session IDs to backend status objects
+ * @returns Array of synthetic SSE events
+ */
+export function createStatusEvents(statusMap: Record<string, BackendSessionStatus>): SSEEvent[] {
+	return Object.entries(statusMap).map(([sessionID, status]) => ({
+		type: "session.status" as const,
+		properties: {
+			sessionID,
+			status,
+		},
+	}))
+}
+
+/**
+ * Create synthetic message.updated events from bootstrap data
+ *
+ * Bootstrap fetches messages from /session/{id}/message endpoint.
+ * This converts them to SSE events so bootstrap can use routeEvent().
+ *
+ * @param messages - Array of messages from REST API
+ * @returns Array of synthetic SSE events
+ */
+export function createMessageEvents(messages: Message[]): SSEEvent[] {
+	return messages.map((message) => ({
+		type: "message.updated" as const,
+		properties: {
+			info: message,
+		},
+	}))
+}
+
+/**
+ * Create synthetic message.part.updated events from bootstrap data
+ *
+ * Bootstrap fetches parts from /session/{id}/message/{messageId}/part endpoint.
+ * This converts them to SSE events so bootstrap can use routeEvent().
+ *
+ * CRITICAL: Part events have nested structure: properties.part
+ * Not flat like other events.
+ *
+ * @param parts - Array of parts from REST API
+ * @returns Array of synthetic SSE events
+ */
+export function createPartEvents(parts: Part[]): SSEEvent[] {
+	return parts.map((part) => ({
+		type: "message.part.updated" as const,
+		properties: {
+			part,
+			// delta is optional - only present during live streaming
+			// Bootstrap data doesn't have deltas
+		},
+	}))
+}
+
+/**
+ * TECH DEBT: No event schema exists for project data
+ *
+ * Bootstrap fetches project from /project/current endpoint and stores in projectsAtom.
+ * However, there is NO SSE event type for projects in the schema.
+ *
+ * Options:
+ * 1. Create new event type: project.updated (requires backend changes)
+ * 2. Leave as direct registry.set() (current approach)
+ * 3. Create synthetic event with custom type (breaks schema validation)
+ *
+ * Decision: Document as tech debt. Project data is relatively static (rarely changes).
+ * Direct mutation is acceptable until we have proper project.updated events.
+ *
+ * TODO: Add project.updated event to backend SSE schema
+ * TODO: Update sse/schemas.ts with ProjectUpdatedEvent
+ * TODO: Create createProjectEvents() factory
+ */

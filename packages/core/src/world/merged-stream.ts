@@ -20,7 +20,6 @@ import { Effect, Stream, pipe, Scope, Exit } from "effect"
 import type { EventSource, SourceEvent } from "./event-source.js"
 import type { WorldStreamConfig, WorldStreamHandle, WorldState } from "./types.js"
 import {
-	WorldStore,
 	Registry,
 	sessionsAtom,
 	messagesAtom,
@@ -33,7 +32,6 @@ import {
 } from "./atoms.js"
 import { WorldSSE } from "./sse.js"
 import type { Message, Part, Session } from "../types/domain.js"
-import type { SessionStatus } from "../types/events.js"
 import type { Layer } from "effect"
 import type { Discovery } from "./discovery/index.js"
 
@@ -65,103 +63,6 @@ export interface MergedStreamConfig extends WorldStreamConfig {
 	 * Testing: Use Layer.succeed(Discovery, { discover: () => Effect.succeed([...]) })
 	 */
 	discoveryLayer?: Layer.Layer<Discovery>
-}
-
-/**
- * Route a SourceEvent to appropriate Registry atom update
- *
- * Pattern: lightweight bridge between event stream and state mutations.
- * Stateless router - Registry atoms handle updates with automatic invalidation.
- *
- * From Hivemind (mem-79f347f38521edd7): SSE-to-Store Bridge Pattern
- */
-function routeEventToRegistry(event: SourceEvent, registry: Registry.Registry): void {
-	const { type, data } = event
-
-	// Type guards prevent runtime errors from malformed events
-	switch (type) {
-		case "session.created":
-		case "session.updated": {
-			const session = data as Session
-			if (session?.id) {
-				// Upsert session in sessionsAtom (Map)
-				const sessions = registry.get(sessionsAtom)
-				const updated = new Map(sessions)
-				updated.set(session.id, session)
-				registry.set(sessionsAtom, updated)
-			}
-			break
-		}
-
-		case "message.created":
-		case "message.updated": {
-			const message = data as Message
-			if (message?.id) {
-				// Upsert message in messagesAtom (Map)
-				const messages = registry.get(messagesAtom)
-				const updated = new Map(messages)
-				updated.set(message.id, message)
-				registry.set(messagesAtom, updated)
-
-				// Receiving message events = session is active
-				// Mark as "running" since we're getting live data
-				if (message.sessionID) {
-					const statuses = registry.get(statusAtom)
-					const updatedStatuses = new Map(statuses)
-					updatedStatuses.set(message.sessionID, "running")
-					registry.set(statusAtom, updatedStatuses)
-				}
-			}
-			break
-		}
-
-		case "part.created":
-		case "part.updated":
-		case "message.part.updated": {
-			// Handle both part.* and message.part.updated event types
-			// message.part.updated wraps part data in a "part" property
-			const partData =
-				type === "message.part.updated" ? (data as { part?: Part }).part : (data as Part)
-
-			if (partData?.id) {
-				// Upsert part in partsAtom (Map)
-				const parts = registry.get(partsAtom)
-				const updated = new Map(parts)
-				updated.set(partData.id, partData)
-				registry.set(partsAtom, updated)
-
-				// Receiving part events = session is active
-				// Parts from SSE have sessionID directly
-				const sessionId = (partData as Part & { sessionID?: string }).sessionID
-				if (sessionId) {
-					const statuses = registry.get(statusAtom)
-					const updatedStatuses = new Map(statuses)
-					updatedStatuses.set(sessionId, "running")
-					registry.set(statusAtom, updatedStatuses)
-				}
-			}
-			break
-		}
-
-		case "session.status": {
-			const { sessionID, status } = data as {
-				sessionID?: string
-				status?: SessionStatus
-			}
-			if (sessionID && status) {
-				const statuses = registry.get(statusAtom)
-				const updated = new Map(statuses)
-				updated.set(sessionID, status)
-				registry.set(statusAtom, updated)
-			}
-			break
-		}
-
-		// Unknown event types are ignored gracefully
-		// Additional event types (memory_stored, bead_created from swarm-db) can be added here
-		default:
-			break
-	}
 }
 
 /**
@@ -425,43 +326,43 @@ export function createMergedWorldStream(config: MergedStreamConfig = {}): Merged
 		cleanupMount() // Unmount worldStateAtom
 	}
 
-	// Start event consumer for additional sources (swarm-db, etc.)
-	// SSE is handled separately by WorldSSE for backward compatibility
-	// Consumer runs in background and routes events to WorldStore
-	if (sources.length > 0) {
-		const consumerEffect = pipe(
-			stream(),
-			Stream.runForEach((event) =>
-				Effect.sync(() => {
-					routeEventToRegistry(event, registry)
-
-					// Call onEvent callback for all source events (not just SSE)
-					if (onEvent) {
-						// Convert SourceEvent to SSEEventInfo format
-						// Extract properties from data (assuming data is an object)
-						const properties =
-							typeof event.data === "object" && event.data !== null
-								? (event.data as Record<string, unknown>)
-								: { raw: event.data }
-
-						onEvent({
-							source: event.source, // Top-level source for formatSSEEvent
-							type: event.type,
-							properties,
-						})
-					}
-				}),
-			),
-			// Catch all errors to prevent consumer from crashing
-			Effect.catchAll(() => Effect.void),
-		)
-
-		// Run consumer in background (fire and forget)
-		Effect.runPromise(consumerEffect).catch(() => {
-			// Consumer errors are logged but don't crash the stream
-			// This allows graceful degradation if sources fail
-		})
-	}
+	// TODO (0c.4): Re-enable event consumer for additional sources (swarm-db, etc.)
+	// SwarmDb event paths eliminated for now - will be re-added in future phase
+	// Uncomment when routeEvent() is updated to handle SourceEvent types
+	// if (sources.length > 0) {
+	// 	const consumerEffect = pipe(
+	// 		stream(),
+	// 		Stream.runForEach((event) =>
+	// 			Effect.sync(() => {
+	// 				// TODO: Call routeEvent() or new router for SourceEvent types
+	//
+	// 				// Call onEvent callback for all source events (not just SSE)
+	// 				if (onEvent) {
+	// 					// Convert SourceEvent to SSEEventInfo format
+	// 					// Extract properties from data (assuming data is an object)
+	// 					const properties =
+	// 						typeof event.data === "object" && event.data !== null
+	// 							? (event.data as Record<string, unknown>)
+	// 							: { raw: event.data }
+	//
+	// 					onEvent({
+	// 						source: event.source, // Top-level source for formatSSEEvent
+	// 						type: event.type,
+	// 						properties,
+	// 					})
+	// 				}
+	// 			}),
+	// 		),
+	// 		// Catch all errors to prevent consumer from crashing
+	// 		Effect.catchAll(() => Effect.void),
+	// 	)
+	//
+	// 	// Run consumer in background (fire and forget)
+	// 	Effect.runPromise(consumerEffect).catch(() => {
+	// 		// Consumer errors are logged but don't crash the stream
+	// 		// This allows graceful degradation if sources fail
+	// 	})
+	// }
 
 	return {
 		subscribe,
