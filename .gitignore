@@ -46,3 +46,4 @@ bun.lockb
 # npm auth (created by CI)
 .npmrc
 .swarm/
+opensrc/

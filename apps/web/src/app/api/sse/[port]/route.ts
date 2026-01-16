@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
+import { createAuthorizationHeader, getManualServerByProxyPort } from "@/lib/manual-server-registry"
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ port: string }> }) {
 	const { port } = await params // Next.js 16 requires await
@@ -15,13 +16,25 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 		return NextResponse.json({ error: "Port out of valid range" }, { status: 400 })
 	}
 
+	// Check if this is a manual (remote) server proxy port
+	const manualServer = await getManualServerByProxyPort(portNum)
+	const targetUrl = manualServer
+		? `${manualServer.url}/global/event`
+		: `http://127.0.0.1:${portNum}/global/event`
+
+	const headers = new Headers({
+		Accept: "text/event-stream",
+		"Cache-Control": "no-cache",
+	})
+	if (manualServer) {
+		const authorization = createAuthorizationHeader(manualServer)
+		if (authorization) {
+			headers.set("authorization", authorization)
+		}
+	}
+
 	try {
-		const response = await fetch(`http://127.0.0.1:${portNum}/global/event`, {
-			headers: {
-				Accept: "text/event-stream",
-				"Cache-Control": "no-cache",
-			},
-		})
+		const response = await fetch(targetUrl, { headers })
 
 		if (!response.ok) {
 			return NextResponse.json(
