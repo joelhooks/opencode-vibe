@@ -1,50 +1,31 @@
-# opencode-vibe 🏄‍♂️
-
-```
-                                      _      │       _ _
-  ___  _ __   ___ _ __   ___ ___   __| | ___ │__   _(_) |__   ___
- / _ \| '_ \ / _ \ '_ \ / __/ _ \ / _` |/ _ \│\ \ / / | '_ \ / _ \
-| (_) | |_) |  __/ | | | (_| (_) | (_| |  __/│ \ V /| | |_) |  __/
- \___/| .__/ \___|_| |_|\___\___/ \__,_|\___│  \_/ |_|_.__/ \___|
-      |_|                                   │
-```
+![header](demo/header.png)
 
 Next.js 16 rebuild of the OpenCode web application. Real-time chat UI with streaming message display, SSE sync, and React Server Components.
 
-> **Warning:** This project uses Next.js 16 canary - bleeding edge, expect rough edges. Catppuccin-themed because we're not savages.
+> **Warning:** This project uses Next.js 16 canary - bleeding edge. Catppuccin-themed because we're not savages.
 
 ## Quick Start
 
-**Prerequisites:** [Bun](https://bun.sh) v1.3+ and [OpenCode CLI](https://github.com/sst/opencode) running locally.
+**Prerequisites:** [Bun](https://bun.sh) v1.3+ and [OpenCode CLI](https://github.com/sst/opencode).
 
-```bash
-# 1. Install dependencies
-bun install
+1. **Start OpenCode in your project:**
+   Navigate to the project you want to work on and keep this running:
+   ```bash
+   cd /path/to/your/project
+   opencode
+   ```
 
-# 2. Start OpenCode (any mode - TUI or serve)
-cd /path/to/your/project
-opencode
+2. **Start the Web UI:**
+   Clone this repo, install, and run:
+   ```bash
+   git clone https://github.com/joelhooks/opencode-vibe.git
+   cd opencode-vibe
+   bun install
+   bun dev
+   ```
 
-# 3. Start the web UI
-bun dev
-
-# 4. Open browser
-# Navigate to: http://localhost:8423
-```
-
-The web UI auto-discovers all running OpenCode processes. No configuration needed.
-
----
-
-## What's Here
-
-**Monorepo structure:**
-
-- **`apps/web/`** - Next.js 16 web application (App Router, RSC, Tailwind)
-- **`apps/swarm-cli/`** - CLI for visualizing world state across servers
-- **`packages/core/`** - World stream, atoms, Effect services, types
-- **`packages/react/`** - React bindings (hooks, providers, store)
-- **`docs/`** - Architecture Decision Records and implementation guides
+3. **Open Browser:**
+   Go to `http://localhost:8423`
 
 ---
 
@@ -58,29 +39,6 @@ The web UI auto-discovers all running OpenCode processes. No configuration neede
 - **Slash commands** - Type `/` for actions like `/fix`, `/test`, `/refactor`
 - **File references** - Type `@` to fuzzy-search and attach files as context
 - **Catppuccin theme** - Latte (light) / Mocha (dark) with proper syntax highlighting
-
----
-
-## Development
-
-**Available scripts:**
-
-```bash
-# Development
-bun dev                 # Start Next.js dev server (port 8423 = VIBE)
-bun build               # Production build
-
-# Code quality
-bun run typecheck       # TypeScript check (via turbo, checks all packages)
-bun lint                # Run oxlint
-bun format              # Format with Biome
-
-# Testing
-bun test                # Run tests (Vitest)
-bun test --watch        # Watch mode
-```
-
-**CRITICAL:** Always run `bun run typecheck` from repo root before committing. Turbo checks the full monorepo.
 
 ---
 
@@ -100,28 +58,10 @@ bun test --watch        # Watch mode
 
 ---
 
-## Documentation
-
-- **`apps/web/README.md`** - Web app architecture and patterns
-- **`packages/core/README.md`** - Core SDK and world stream documentation
-- **`packages/react/README.md`** - React hooks and providers
-- **`docs/adr/`** - Architecture Decision Records
-  - ADR-016: Core Layer Responsibility (Core owns computation, React binds UI)
-  - ADR-018: Reactive World Stream (`createWorldStream()` is THE API)
-- **`docs/guides/`** - Implementation guides (SSE sync, mobile, subagents)
-- **`AGENTS.md`** - AI agent conventions and development patterns
-
----
-
 ## Contributing
 
-1. Use Bun (not npm/pnpm)
-2. Follow TDD: RED → GREEN → REFACTOR
-3. Run `bun format` before committing
-4. Check `bun lint` and `bun run typecheck` pass
-
----
+See **[CONTRIBUTING.md](CONTRIBUTING.md)** for development workflow, architecture docs, and project structure.
 
 ## License
 
-MIT
+This project is licensed under the MIT License - see the **[LICENSE](LICENSE)** file for details.
