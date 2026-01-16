@@ -1,3 +1,21 @@
+/**
+ * Server Discovery API Route
+ *
+ * Discovers running opencode servers by scanning processes.
+ * Uses lsof to find processes listening on ports with "bun" or "opencode" in the command.
+ * Verifies each candidate by hitting /project endpoint and captures the directory.
+ *
+ * Returns: Array<{ port: number; pid: number; directory: string }>
+ *
+ * This enables routing messages to the correct server based on directory!
+ *
+ * Performance optimizations:
+ * - Parallel verification of all candidate ports
+ * - 2s timeout on lsof command
+ * - 300ms timeout on each verification request
+ * - Results cached for 2s via Cache-Control header
+ */
+
 import { exec } from "child_process"
 import { NextResponse } from "next/server"
 import { promisify } from "util"
@@ -15,7 +33,7 @@ interface DiscoveredServer {
 	port: number
 	pid: number
 	directory: string
-	sessions?: string[]
+	sessions?: string[] // Session IDs hosted by this server
 	source: "local" | "manual"
 	url?: string
 	name?: string
@@ -27,11 +45,16 @@ interface CandidatePort {
 	pid: number
 }
 
+/**
+ * Verify a port is actually an opencode server and get its directory + sessions
+ * Returns null if not a valid opencode server
+ */
 async function verifyOpencodeServer(candidate: CandidatePort): Promise<DiscoveredServer | null> {
 	const controller = new AbortController()
 	const timeoutId = setTimeout(() => controller.abort(), 500)
 
 	try {
+		// Fetch project info
 		const res = await fetch(`http://127.0.0.1:${candidate.port}/project/current`, {
 			signal: controller.signal,
 		})
@@ -46,6 +69,7 @@ async function verifyOpencodeServer(candidate: CandidatePort): Promise<Discovere
 			return null
 		}
 
+		// Fetch session list
 		let sessions: string[] | undefined
 		try {
 			const sessionTimeout = setTimeout(() => controller.abort(), 300)
@@ -61,6 +85,7 @@ async function verifyOpencodeServer(candidate: CandidatePort): Promise<Discovere
 					: undefined
 			}
 		} catch {
+			// Session fetch failed - not critical, continue without sessions
 			sessions = undefined
 		}
 
@@ -102,6 +127,9 @@ async function verifyAndTransformManualServers(
 	return results.filter((s) => s !== null)
 }
 
+/**
+ * Run promises with limited concurrency
+ */
 async function promiseAllSettledLimit<T>(tasks: (() => Promise<T>)[], limit: number): Promise<T[]> {
 	const results: T[] = []
 	let index = 0
@@ -114,7 +142,7 @@ async function promiseAllSettledLimit<T>(tasks: (() => Promise<T>)[], limit: num
 				try {
 					results[currentIndex] = await task()
 				} catch {
-					// intentional no-op
+					// Swallow errors, results[currentIndex] stays undefined
 				}
 			}
 		}

@@ -40,6 +40,10 @@ type RouteContext = {
 	}>
 }
 
+/**
+ * Reserved segments that should not be treated as port numbers
+ * These have their own static route handlers (e.g., /api/opencode/servers/route.ts)
+ */
 const RESERVED_SEGMENTS = new Set(["servers"])
 
 /**
@@ -117,11 +121,13 @@ async function proxyRequest(
 			headers.set("x-opencode-directory", directoryHeader)
 		}
 
+		// Preserve content-type for POST/PUT/PATCH
 		const contentType = request.headers.get("content-type")
 		if (contentType) {
 			headers.set("content-type", contentType)
 		}
 
+		// Add auth for manual (remote) servers
 		if (manualServer) {
 			const authorization = createAuthorizationHeader(manualServer)
 			if (authorization) {
@@ -129,6 +135,7 @@ async function proxyRequest(
 			}
 		}
 
+		// Copy body for POST/PUT/PATCH
 		let body: ReadableStream | null = null
 		if (["POST", "PUT", "PATCH"].includes(request.method)) {
 			body = request.body

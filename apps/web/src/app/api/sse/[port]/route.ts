@@ -11,10 +11,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
 	const portNum = parseInt(port, 10)
 
+	// Validate port is in reasonable range
 	if (portNum < 1024 || portNum > 65535) {
 		return NextResponse.json({ error: "Port out of valid range" }, { status: 400 })
 	}
 
+	// Check if this is a manual (remote) server proxy port
 	const manualServer = await getManualServerByProxyPort(portNum)
 	const targetUrl = manualServer
 		? `${manualServer.url}/global/event`
