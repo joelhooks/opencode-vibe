@@ -5,10 +5,10 @@
  * No React dependencies - tests Effect logic directly.
  */
 
-import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
-import { ServerAtom, selectBestServer, DEFAULT_SERVER } from "./servers.js"
-import type { ServerInfo } from "@opencode-vibe/core/discovery"
+import { describe, expect, it } from "vitest"
+import type { ServerInfo } from "../discovery/index.js"
+import { DEFAULT_SERVER, ServerAtom, selectBestServer } from "./servers.js"
 
 describe("selectBestServer", () => {
 	it("returns first server with directory when available", () => {

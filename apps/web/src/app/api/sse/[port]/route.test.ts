@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { GET } from "./route"
 import { NextRequest } from "next/server"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { GET } from "./route"
 
 describe("SSE Proxy Route /api/sse/[port]", () => {
 	let originalFetch: typeof global.fetch
@@ -142,12 +142,16 @@ describe("SSE Proxy Route /api/sse/[port]", () => {
 			expect(response.body).toBe(mockStream)
 
 			// Verify fetch was called with correct URL and headers
-			expect(global.fetch).toHaveBeenCalledWith("http://127.0.0.1:3000/global/event", {
-				headers: {
-					Accept: "text/event-stream",
-					"Cache-Control": "no-cache",
-				},
-			})
+			expect(global.fetch).toHaveBeenCalledWith(
+				"http://127.0.0.1:3000/global/event",
+				expect.objectContaining({ headers: expect.any(Headers) }),
+			)
+			const callArgs = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
+				string,
+				{ headers: Headers },
+			]
+			expect(callArgs[1].headers.get("Accept")).toBe("text/event-stream")
+			expect(callArgs[1].headers.get("Cache-Control")).toBe("no-cache")
 		})
 
 		it("accepts valid ports within range", async () => {
