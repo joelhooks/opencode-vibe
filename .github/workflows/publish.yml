@@ -19,7 +19,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
       - name: Setup npmrc
         run: printf '%s' "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
