@@ -8,27 +8,24 @@ on:
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - uses: oven-sh/setup-bun@v2
-
       - name: Setup npmrc
-        run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
-
+        run: printf '%s' '//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}' > .npmrc
       - name: Install dependencies
         run: bun install --frozen-lockfile
-
       - name: Build packages
         run: bun turbo build --filter='./packages/*'
-
       - name: Read changesets
         id: changesets_content
         run: |
@@ -38,7 +35,6 @@ jobs:
             [ "$(basename "$f")" = "README.md" ] && continue
             CONTENT="$CONTENT$(cat "$f")\n\n"
           done
-          
           if [ -z "$CONTENT" ]; then
             echo "has_changesets=false" >> $GITHUB_OUTPUT
           else
@@ -47,7 +43,6 @@ jobs:
             echo -e "$CONTENT" >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
           fi
-
       - name: Generate PR title with AI
         if: steps.changesets_content.outputs.has_changesets == 'true'
         id: pr_title
@@ -62,12 +57,11 @@ jobs:
             - Be specific about what changed
             - No version numbers
             - Output ONLY the title, nothing else
-            
+
             Example: "release: add react hooks and router package"
-            
+
             Changesets:
             ${{ steps.changesets_content.outputs.content }}
-
       - name: Set PR title
         id: final_title
         run: |
@@ -76,7 +70,6 @@ jobs:
             TITLE="chore: update versions"
           fi
           echo "title=$TITLE" >> $GITHUB_OUTPUT
-
       - name: Create and publish versions
         uses: changesets/action@v1
         with:
