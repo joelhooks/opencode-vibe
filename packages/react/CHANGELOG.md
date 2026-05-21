@@ -1,5 +1,12 @@
 # @opencode-vibe/react
 
+## 0.4.1
+
+### Patch Changes
+
+- Updated dependencies [[`c835050`](https://github.com/joelhooks/opencode-vibe/commit/c835050984388a9414b37b9c961a6a5b1a4deac5)]:
+  - @opencode-vibe/core@0.4.0
+
 ## 0.4.0
 
 ### Minor Changes
